@@ -2,12 +2,14 @@ import "./styles/global.css";
 import "./styles/auth.css";
 import "./styles/landing.css";
 import "./styles/news.css";
+import "./styles/stock.css";
 
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase.js";
 import { renderAuthPage } from "./pages/auth.js";
 import { renderLandingPage } from "./pages/landing.js";
 import { renderNewsPage } from "./pages/news.js";
+import { renderStockPage } from "./pages/stock.js";
 
 const app = document.getElementById("app");
 
@@ -46,6 +48,8 @@ function route() {
   const hash = window.location.hash;
   if (hash === "#news") {
     renderNewsPage(app, currentUser);
+  } else if (hash === "#stock-sentiment") {
+    renderStockPage(app, currentUser);
   } else {
     renderLandingPage(app, currentUser);
   }
