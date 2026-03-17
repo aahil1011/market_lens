@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:frontend": "vite",
+    "dev:backend": "python backend/app.py",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -12,6 +14,7 @@
     "vite": "^8.0.0"
   },
   "dependencies": {
-    "firebase": "^12.10.0"
+    "firebase": "^12.10.0",
+    "lightweight-charts": "^5.1.0"
   }
 }
