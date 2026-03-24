@@ -17,8 +17,9 @@ import {
  * Render stock sentiment page.
  * @param {HTMLElement} container
  * @param {import("firebase/auth").User} user
+ * @param {{symbol?: string}} [options]
  */
-export function renderStockPage(container, user) {
+export function renderStockPage(container, user, options = {}) {
   let currentSymbol = "";
   let currentPayload = null;
   let portfolio = [];
@@ -795,6 +796,12 @@ export function renderStockPage(container, user) {
 
   setActiveTimeframe(selectedWindowDays);
   loadPortfolio();
+
+  const initialSymbol = String(options?.symbol || "").trim().toUpperCase();
+  if (initialSymbol) {
+    searchInput.value = initialSymbol;
+    runAnalyze(initialSymbol);
+  }
 }
 
 function getDisplayName(user) {

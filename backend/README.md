@@ -23,4 +23,7 @@ pip install -r backend/requirements-finbert.txt
 
 - `GET /api/health`
 - `POST /api/stock-sentiment`
+- `GET /api/stock-search`
 - `POST /api/stock-chat`
+- `POST /api/portfolio-analyze`
+- `POST /api/portfolio-chat`

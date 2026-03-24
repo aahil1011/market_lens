@@ -3,6 +3,7 @@ import "./styles/auth.css";
 import "./styles/landing.css";
 import "./styles/news.css";
 import "./styles/stock.css";
+import "./styles/portfolio.css";
 
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase.js";
@@ -10,6 +11,7 @@ import { renderAuthPage } from "./pages/auth.js";
 import { renderLandingPage } from "./pages/landing.js";
 import { renderNewsPage } from "./pages/news.js";
 import { renderStockPage } from "./pages/stock.js";
+import { renderPortfolioPage } from "./pages/portfolio.js";
 
 const app = document.getElementById("app");
 
@@ -38,6 +40,15 @@ app.innerHTML = `
 
 let currentUser = null;
 
+function parseHashState() {
+  const hash = window.location.hash || "";
+  const [route = "", query = ""] = hash.split("?");
+  return {
+    route,
+    params: new URLSearchParams(query),
+  };
+}
+
 // Route based on hash
 function route() {
   if (!currentUser) {
@@ -45,11 +56,15 @@ function route() {
     return;
   }
 
-  const hash = window.location.hash;
-  if (hash === "#news") {
+  const { route: hashRoute, params } = parseHashState();
+  if (hashRoute === "#news") {
     renderNewsPage(app, currentUser);
-  } else if (hash === "#stock-sentiment") {
-    renderStockPage(app, currentUser);
+  } else if (hashRoute === "#stock-sentiment") {
+    renderStockPage(app, currentUser, { symbol: params.get("symbol") || "" });
+  } else if (hashRoute === "#portfolio-advisor") {
+    renderPortfolioPage(app, currentUser, {
+      focus: params.get("focus") || "",
+    });
   } else {
     renderLandingPage(app, currentUser);
   }

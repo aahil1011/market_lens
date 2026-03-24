@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import random
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -86,6 +87,28 @@ class StockChatRequest(BaseModel):
     symbol: str = Field(min_length=1, max_length=15)
     question: str = Field(min_length=1, max_length=1000)
     context: dict[str, Any] | None = None
+
+
+class PortfolioHolding(BaseModel):
+    symbol: str = Field(min_length=1, max_length=15)
+    shares: float = Field(gt=0, le=1_000_000)
+    avgBuyPrice: float = Field(ge=0)
+    assetType: str | None = None
+    sector: str | None = None
+
+
+class PortfolioAnalyzeRequest(BaseModel):
+    holdings: list[PortfolioHolding] = Field(default_factory=list, max_length=60)
+    amount: float = Field(default=50_000, ge=1_000, le=1_000_000_000)
+    riskLevel: str = Field(default="Moderate", min_length=3, max_length=20)
+    years: int = Field(default=10, ge=1, le=40)
+    expectedReturn: float = Field(default=10.0, ge=0.1, le=100.0)
+
+
+class PortfolioChatRequest(BaseModel):
+    holdings: list[PortfolioHolding] = Field(default_factory=list, max_length=60)
+    question: str = Field(min_length=1, max_length=1200)
+    analysis: dict[str, Any] | None = None
 
 
 app = FastAPI(title="MarketLens Stock Backend", version="1.0.0")
@@ -452,6 +475,831 @@ def run_groq_json(prompt: str) -> dict[str, Any]:
         return {}
 
 
+def to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def infer_asset_type(symbol: str, explicit: str | None = None) -> str:
+    if explicit:
+        return norm(explicit)[:40] or "Stock"
+    upper = symbol.upper()
+    if upper in {"GLD", "SLV", "USO", "UNG", "XAUUSD", "XAGUSD"}:
+        return "Commodity"
+    if upper.endswith("USD") and len(upper) <= 8:
+        return "Crypto"
+    if upper in {"SPY", "QQQ", "DIA", "IWM", "VOO", "VTI"}:
+        return "ETF"
+    return "Stock"
+
+
+def infer_sector(symbol: str, asset_type: str, explicit: str | None = None) -> str:
+    if explicit:
+        return norm(explicit)[:40] or "Unknown"
+    if asset_type == "Commodity":
+        return "Commodity"
+    if asset_type == "Crypto":
+        return "Digital Asset"
+    if asset_type == "ETF":
+        return "Index"
+    upper = symbol.upper()
+    if upper in {"JPM", "BAC", "WFC", "GS"}:
+        return "Finance"
+    if upper in {"XOM", "CVX", "SHEL", "BP"}:
+        return "Energy"
+    if upper in {"PFE", "JNJ", "MRK", "UNH"}:
+        return "Healthcare"
+    return "Technology" if upper in {"AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "META"} else "Unknown"
+
+
+def safe_pct_change(values: list[float], lookback: int) -> float:
+    if len(values) < lookback + 1:
+        return 0.0
+    old = values[-(lookback + 1)]
+    new = values[-1]
+    if not old:
+        return 0.0
+    return round(((new - old) / old) * 100, 2)
+
+
+def annualized_volatility(values: list[float]) -> float:
+    if len(values) < 3:
+        return 25.0
+    rets: list[float] = []
+    for prev, curr in zip(values[:-1], values[1:]):
+        if prev:
+            rets.append((curr - prev) / prev)
+    if len(rets) < 2:
+        return 25.0
+    mean = sum(rets) / len(rets)
+    var = sum((x - mean) ** 2 for x in rets) / max(1, len(rets) - 1)
+    vol = math.sqrt(var) * math.sqrt(252) * 100
+    return round(max(0.0, min(220.0, vol)), 2)
+
+
+def percentile(values: list[float], p: float) -> float:
+    if not values:
+        return 0.0
+    arr = sorted(values)
+    if len(arr) == 1:
+        return float(arr[0])
+    rank = (p / 100) * (len(arr) - 1)
+    lo = int(math.floor(rank))
+    hi = int(math.ceil(rank))
+    if lo == hi:
+        return float(arr[lo])
+    frac = rank - lo
+    return float(arr[lo] + (arr[hi] - arr[lo]) * frac)
+
+
+def normalize_decision(value: Any) -> str:
+    text = norm(value).lower().replace(" ", "")
+    if text in {"buymore", "buy", "accumulate", "add"}:
+        return "BuyMore"
+    if text in {"sell", "reduce", "exit"}:
+        return "Sell"
+    return "Hold"
+
+
+def normalize_sentiment(value: Any) -> str:
+    text = norm(value).lower()
+    if text in {"positive", "bullish"}:
+        return "positive"
+    if text in {"negative", "bearish"}:
+        return "negative"
+    return "neutral"
+
+
+def normalize_risk(value: Any) -> str:
+    text = norm(value).lower()
+    if "high" in text:
+        return "High Risk"
+    if "low" in text:
+        return "Low Risk"
+    return "Medium Risk"
+
+
+def fallback_risk(volatility: float, beta: float, sentiment_label: str) -> str:
+    if volatility > 50 or beta > 1.5 or sentiment_label == "negative":
+        return "High Risk"
+    if volatility < 25 and beta < 1.1 and sentiment_label != "negative":
+        return "Low Risk"
+    return "Medium Risk"
+
+
+def fallback_decision(sentiment_label: str, volatility: float, pnl_pct: float, chg_30d_pct: float) -> str:
+    if sentiment_label == "negative" and (volatility > 45 or pnl_pct < -12):
+        return "Sell"
+    if sentiment_label == "positive" and volatility < 35 and chg_30d_pct > 0:
+        return "BuyMore"
+    return "Hold"
+
+
+def build_position_snapshot(holding: PortfolioHolding) -> dict[str, Any]:
+    symbol = norm(holding.symbol).upper()
+    quote = fetch_finnhub_quote(symbol)
+    metric = fetch_finnhub_metrics(symbol)
+    candles = fetch_finnhub_candles(symbol, days=365)
+
+    close_values = [to_float(x, 0.0) for x in (candles.get("c") or []) if to_float(x, 0.0) > 0]
+    time_values = [int(x) for x in (candles.get("t") or []) if to_float(x, 0.0) > 0]
+
+    current_price = to_float(quote.get("c"), 0.0)
+    if current_price <= 0:
+        current_price = to_float(quote.get("pc"), 0.0)
+    if current_price <= 0 and close_values:
+        current_price = close_values[-1]
+    if current_price <= 0:
+        current_price = to_float(holding.avgBuyPrice, 0.0)
+
+    chg_7d = safe_pct_change(close_values, 5)
+    chg_30d = safe_pct_change(close_values, 21)
+    chg_6m = safe_pct_change(close_values, 126)
+    chg_1y = safe_pct_change(close_values, 252)
+
+    vol = annualized_volatility(close_values)
+    beta = to_float(metric.get("beta"), 1.1)
+    pe_ttm = to_float(metric.get("peTTM"), 0.0)
+
+    finnhub_news = fetch_finnhub_news(symbol)
+    gnews = fetch_gnews_news(symbol)
+    stocktwits, _social = fetch_stocktwits_posts(symbol)
+    merged_news = finnhub_news + gnews + stocktwits
+
+    dedupe: dict[str, dict[str, Any]] = {}
+    for item in merged_news:
+        key = (item.get("url") or item.get("title") or "").lower()
+        if key and key not in dedupe:
+            dedupe[key] = item
+    news_items = sorted(
+        dedupe.values(),
+        key=lambda x: parse_date(x.get("publishedAt", "")).timestamp(),
+        reverse=True,
+    )[:10]
+
+    texts = [f'{n.get("title","")}. {n.get("description","")}' for n in news_items if n.get("title")]
+    scored = FINBERT.score_texts(texts)
+    agg = aggregate_sentiment(scored)
+
+    shares = to_float(holding.shares, 0.0)
+    avg_buy = to_float(holding.avgBuyPrice, 0.0)
+    invested = round(shares * avg_buy, 2)
+    current_value = round(shares * current_price, 2)
+    pnl_usd = round(current_value - invested, 2)
+    pnl_pct = round((pnl_usd / invested) * 100, 2) if invested > 0 else 0.0
+
+    asset_type = infer_asset_type(symbol, holding.assetType)
+    sector = infer_sector(symbol, asset_type, holding.sector)
+
+    candle_points: list[dict[str, Any]] = []
+    for t, c in zip(time_values[-260:], close_values[-260:]):
+        candle_points.append({"time": int(t), "value": round(float(c), 4)})
+
+    return {
+        "symbol": symbol,
+        "name": metric.get("name") or symbol,
+        "assetType": asset_type,
+        "sector": sector,
+        "shares": round(shares, 6),
+        "avgBuyPrice": round(avg_buy, 4),
+        "currentPrice": round(current_price, 4),
+        "invested": invested,
+        "currentValue": current_value,
+        "pnlUsd": pnl_usd,
+        "pnlPct": pnl_pct,
+        "changes": {
+            "d7": chg_7d,
+            "d30": chg_30d,
+            "d180": chg_6m,
+            "d365": chg_1y,
+        },
+        "metrics": {
+            "volatility": vol,
+            "beta": round(beta, 3),
+            "peTTM": round(pe_ttm, 3) if pe_ttm else 0.0,
+            "week52High": to_float(metric.get("52WeekHigh"), 0.0),
+            "week52Low": to_float(metric.get("52WeekLow"), 0.0),
+            "analystRecommendation": norm(metric.get("recommendationKey") or "hold") or "hold",
+        },
+        "sentimentRaw": {
+            "label": agg["label"],
+            "score": agg["score"],
+            "confidence": agg["confidence"],
+            "texts": len(texts),
+        },
+        "newsItems": news_items[:6],
+        "priceSeries": candle_points,
+    }
+
+
+def build_portfolio_prompt(positions: list[dict[str, Any]], total_invested: float, total_current: float, total_pnl_pct: float) -> str:
+    lines: list[str] = []
+    for pos in positions:
+        lines.append(
+            f'{pos["symbol"]} ({pos["assetType"]}, {pos["sector"]}): '
+            f'bought @ ${pos["avgBuyPrice"]}, current ${pos["currentPrice"]}, '
+            f'P&L {pos["pnlPct"]:+.2f}%, sentiment={pos["sentimentRaw"]["label"]} ({pos["sentimentRaw"]["score"]:+.3f}), '
+            f'volatility={pos["metrics"]["volatility"]}%, beta={pos["metrics"]["beta"]}, '
+            f'analyst={pos["metrics"]["analystRecommendation"]}, 7D={pos["changes"]["d7"]:+.2f}%, '
+            f'1Y={pos["changes"]["d365"]:+.2f}%, PE={pos["metrics"]["peTTM"]}'
+        )
+
+    return f"""You are a senior portfolio manager.
+Analyze this portfolio and return ONLY valid JSON.
+
+PORTFOLIO SUMMARY:
+- Total invested: ${total_invested:,.2f}
+- Current value:  ${total_current:,.2f}
+- Overall P&L:    {total_pnl_pct:+.2f}%
+- Positions:      {len(positions)}
+
+POSITIONS:
+{chr(10).join(lines)}
+
+Return JSON with this exact structure:
+{{
+  "positions": {{
+    "TICKER": {{
+      "sentiment": "positive|negative|neutral",
+      "decision": "BuyMore|Hold|Sell",
+      "risk": "Low Risk|Medium Risk|High Risk",
+      "reason": "2-3 concise sentences with evidence"
+    }}
+  }},
+  "portfolio_summary": "4 concise sentences",
+  "portfolio_score": 1-10,
+  "diversification_rating": "Poor|Fair|Good|Excellent",
+  "top_risk": "1 sentence",
+  "top_opportunity": "1 sentence"
+}}
+
+Decision policy:
+- BuyMore: strong positive sentiment + favorable trend + manageable risk.
+- Hold: mixed signals or moderate uncertainty.
+- Sell: negative sentiment + weak trend and/or high risk.
+- High Risk: volatility > 50% OR beta > 1.5 OR severe negative signals.
+- Low Risk: volatility < 25% and stable profile.
+"""
+
+
+def run_portfolio_advisor_llm(positions: list[dict[str, Any]], total_invested: float, total_current: float, total_pnl_pct: float) -> dict[str, Any]:
+    fallback_positions: dict[str, dict[str, Any]] = {}
+    for pos in positions:
+        sent = normalize_sentiment(pos["sentimentRaw"]["label"])
+        risk = fallback_risk(pos["metrics"]["volatility"], pos["metrics"]["beta"], sent)
+        decision = fallback_decision(sent, pos["metrics"]["volatility"], pos["pnlPct"], pos["changes"]["d30"])
+        fallback_positions[pos["symbol"]] = {
+            "sentiment": sent,
+            "decision": decision,
+            "risk": risk,
+            "reason": (
+                f'Sentiment is {sent} ({pos["sentimentRaw"]["score"]:+.3f}), '
+                f'30D move is {pos["changes"]["d30"]:+.2f}%, and volatility is {pos["metrics"]["volatility"]:.1f}%.'
+            ),
+        }
+
+    fallback = {
+        "positions": fallback_positions,
+        "portfolio_summary": "Portfolio guidance generated from FinBERT and market metrics fallback.",
+        "portfolio_score": 5,
+        "diversification_rating": "Fair",
+        "top_risk": "Concentration and volatility risk should be monitored.",
+        "top_opportunity": "Positions with positive sentiment and controlled volatility may allow incremental adds.",
+    }
+
+    if not GROQ_API_KEY:
+        return fallback
+
+    prompt = build_portfolio_prompt(positions, total_invested, total_current, total_pnl_pct)
+    result = run_groq_json(prompt)
+    if not isinstance(result, dict) or not isinstance(result.get("positions"), dict):
+        return fallback
+
+    merged_positions: dict[str, dict[str, Any]] = {}
+    for pos in positions:
+        symbol = pos["symbol"]
+        ai = result.get("positions", {}).get(symbol, {})
+        raw_sent = ai.get("sentiment", pos["sentimentRaw"]["label"])
+        raw_decision = ai.get("decision", fallback_positions[symbol]["decision"])
+        raw_risk = ai.get("risk", fallback_positions[symbol]["risk"])
+        reason = norm(ai.get("reason")) or fallback_positions[symbol]["reason"]
+        merged_positions[symbol] = {
+            "sentiment": normalize_sentiment(raw_sent),
+            "decision": normalize_decision(raw_decision),
+            "risk": normalize_risk(raw_risk),
+            "reason": reason,
+        }
+
+    out = {
+        "positions": merged_positions,
+        "portfolio_summary": norm(result.get("portfolio_summary")) or fallback["portfolio_summary"],
+        "portfolio_score": int(to_float(result.get("portfolio_score"), 5)),
+        "diversification_rating": norm(result.get("diversification_rating")) or "Fair",
+        "top_risk": norm(result.get("top_risk")) or fallback["top_risk"],
+        "top_opportunity": norm(result.get("top_opportunity")) or fallback["top_opportunity"],
+    }
+    out["portfolio_score"] = max(1, min(10, out["portfolio_score"]))
+    return out
+
+
+def project_portfolio(positions: list[dict[str, Any]], months: int, simulations: int = 320) -> dict[str, Any]:
+    days = max(1, int(months * 21))
+    start_val = sum(to_float(p["currentValue"], 0.0) for p in positions)
+    if start_val <= 0:
+        return {
+            "months": months,
+            "days": days,
+            "startValue": 0.0,
+            "finalMean": 0.0,
+            "finalP10": 0.0,
+            "finalP90": 0.0,
+            "series": [{"day": i, "mean": 0.0, "p10": 0.0, "p25": 0.0, "p75": 0.0, "p90": 0.0} for i in range(days + 1)],
+            "model": "Monte Carlo (Notebook-style)",
+        }
+
+    seed = 0
+    for pos in positions:
+        seed += sum(ord(ch) for ch in pos["symbol"])
+    seed += int(start_val) % 100_000
+    rng = random.Random(seed)
+
+    ticker_params: list[dict[str, Any]] = []
+    analyst_adj_map = {
+        "strongbuy": 0.01,
+        "buy": 0.005,
+        "hold": 0.0,
+        "sell": -0.005,
+        "strongsell": -0.01,
+    }
+
+    for pos in positions:
+        sentiment_score = to_float(pos.get("sentimentRaw", {}).get("score"), 0.0)
+        analyst_rec = str(pos.get("metrics", {}).get("analystRecommendation", "hold")).lower().replace(" ", "")
+        analyst_adj = analyst_adj_map.get(analyst_rec, 0.0)
+        annual_drift = 0.07 + sentiment_score * 0.02 + analyst_adj
+        daily_drift = annual_drift / 252
+
+        vol_annual = to_float(pos.get("metrics", {}).get("volatility"), 25.0)
+        vol_daily = max(0.005, min(vol_annual / 100 / math.sqrt(252), 0.05))
+
+        ticker_params.append(
+            {
+                "symbol": pos["symbol"],
+                "shares": to_float(pos.get("shares"), 0.0),
+                "current": to_float(pos.get("currentPrice"), 0.0),
+                "volDaily": vol_daily,
+                "dailyDrift": daily_drift,
+            }
+        )
+
+    all_paths: list[list[float]] = []
+    for _sim in range(simulations):
+        ticker_prices = {tp["symbol"]: tp["current"] for tp in ticker_params}
+        path = [start_val]
+        for _day in range(days):
+            day_val = 0.0
+            for tp in ticker_params:
+                daily_ret = tp["dailyDrift"] + tp["volDaily"] * rng.gauss(0.0, 1.0)
+                daily_ret = max(-0.15, min(0.15, daily_ret))
+                ticker_prices[tp["symbol"]] *= 1 + daily_ret
+                day_val += tp["shares"] * ticker_prices[tp["symbol"]]
+            path.append(day_val)
+        all_paths.append(path)
+
+    series: list[dict[str, Any]] = []
+    for day in range(days + 1):
+        day_values = [path[day] for path in all_paths]
+        mean_val = sum(day_values) / len(day_values)
+        series.append(
+            {
+                "day": day,
+                "mean": round(mean_val, 2),
+                "p10": round(percentile(day_values, 10), 2),
+                "p25": round(percentile(day_values, 25), 2),
+                "p75": round(percentile(day_values, 75), 2),
+                "p90": round(percentile(day_values, 90), 2),
+            }
+        )
+
+    final_values = [path[-1] for path in all_paths]
+    return {
+        "months": months,
+        "days": days,
+        "startValue": round(start_val, 2),
+        "finalMean": round(sum(final_values) / len(final_values), 2),
+        "finalP10": round(percentile(final_values, 10), 2),
+        "finalP90": round(percentile(final_values, 90), 2),
+        "series": series,
+        "model": "Monte Carlo (Notebook-style)",
+    }
+
+
+def normalize_risk_level(value: str) -> str:
+    text = norm(value).lower()
+    if "high" in text:
+        return "High"
+    if "low" in text:
+        return "Low"
+    return "Moderate"
+
+
+def fetch_market_news_headlines(limit: int = 5) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+
+    if GNEWS_API_KEY:
+        payload = fetch_json(
+            "https://gnews.io/api/v4/search",
+            {
+                "q": "stock market OR equities OR financial markets",
+                "lang": "en",
+                "max": limit,
+                "sortby": "publishedAt",
+                "token": GNEWS_API_KEY,
+            },
+            timeout=15,
+        )
+        rows = (payload or {}).get("articles", []) if isinstance(payload, dict) else []
+        for row in rows[:limit]:
+            title = norm(row.get("title"))
+            if not title:
+                continue
+            items.append(
+                {
+                    "title": title,
+                    "description": norm(row.get("description")),
+                    "url": norm(row.get("url")),
+                    "source": norm(((row.get("source") or {}).get("name")) or "GNews"),
+                }
+            )
+
+    if not items and FINNHUB_API_KEY:
+        payload = fetch_json(
+            "https://finnhub.io/api/v1/news",
+            {
+                "category": "general",
+                "token": FINNHUB_API_KEY,
+            },
+            timeout=15,
+        )
+        rows = payload if isinstance(payload, list) else []
+        for row in rows[:limit]:
+            title = norm(row.get("headline"))
+            if not title:
+                continue
+            items.append(
+                {
+                    "title": title,
+                    "description": norm(row.get("summary")),
+                    "url": norm(row.get("url")),
+                    "source": norm(row.get("source")) or "Finnhub",
+                }
+            )
+
+    if items:
+        return items[:limit]
+
+    fallback_titles = [
+        "Global markets trade mixed as investors weigh macro data and rate expectations.",
+        "Technology shares lead gains while defensive sectors remain steady.",
+        "Treasury yields and central bank commentary keep traders cautious.",
+        "Energy prices and commodity flows continue to shape inflation outlook.",
+        "Analysts look for quality balance sheets as volatility remains elevated.",
+    ]
+    return [
+        {
+            "title": title,
+            "description": "",
+            "url": "",
+            "source": "Fallback",
+        }
+        for title in fallback_titles[:limit]
+    ]
+
+
+def aggregate_market_sentiment_scores(news_items: list[dict[str, Any]]) -> dict[str, Any]:
+    texts = [norm(f'{item.get("title", "")}. {item.get("description", "")}') for item in news_items]
+    scored = FINBERT.score_texts([text for text in texts if text])
+    if not scored:
+        return {
+            "negative": 0.2,
+            "neutral": 0.6,
+            "positive": 0.2,
+            "marketMood": "neutral",
+        }
+
+    negative = sum(item.get("negative", 0.0) for item in scored) / len(scored)
+    neutral = sum(item.get("neutral", 0.0) for item in scored) / len(scored)
+    positive = sum(item.get("positive", 0.0) for item in scored) / len(scored)
+    mood = "bullish" if positive > negative + 0.04 else "bearish" if negative > positive + 0.04 else "neutral"
+    return {
+        "negative": round(negative, 4),
+        "neutral": round(neutral, 4),
+        "positive": round(positive, 4),
+        "marketMood": mood,
+    }
+
+
+def build_notebook_allocation(amount: float, risk_level: str, sentiment_scores: dict[str, Any]) -> dict[str, Any]:
+    positive = to_float(sentiment_scores.get("positive"), 0.2)
+    negative = to_float(sentiment_scores.get("negative"), 0.2)
+
+    stock_weight = 0.4 + (positive - negative)
+    bond_weight = 0.3 - (positive - negative) / 2
+    gold_weight = 0.2
+    cash_weight = 0.1
+
+    if risk_level == "High":
+        stock_weight += 0.2
+        bond_weight -= 0.1
+    elif risk_level == "Low":
+        stock_weight -= 0.2
+        bond_weight += 0.2
+
+    raw_weights = {
+        "Stocks": max(stock_weight, 0.05),
+        "Bonds": max(bond_weight, 0.05),
+        "Gold": max(gold_weight, 0.05),
+        "Cash": max(cash_weight, 0.05),
+    }
+    total = sum(raw_weights.values()) or 1.0
+    percentages = {key: round((value / total) * 100, 1) for key, value in raw_weights.items()}
+    amounts = {key: round(amount * (percentages[key] / 100), 2) for key in raw_weights}
+    return {
+        "percentages": percentages,
+        "amounts": amounts,
+    }
+
+
+def build_growth_projection(amount: float, years: int, expected_return: float) -> dict[str, Any]:
+    annual_rate = max(0.0, expected_return) / 100
+    series = []
+    for year in range(0, max(1, years) + 1):
+        value = round(amount * ((1 + annual_rate) ** year), 2)
+        series.append({"year": year, "value": value})
+    return {
+        "years": years,
+        "expectedReturn": round(expected_return, 2),
+        "series": series,
+        "finalValue": series[-1]["value"],
+    }
+
+
+def build_portfolio_maker_summary(
+    news_items: list[dict[str, Any]],
+    sentiment_scores: dict[str, Any],
+    risk_level: str,
+    years: int,
+    expected_return: float,
+    allocation: dict[str, Any],
+) -> dict[str, Any]:
+    mood = norm(sentiment_scores.get("marketMood")) or "neutral"
+    allocation_text = ", ".join(
+        f"{key}: {value:.1f}%"
+        for key, value in (allocation.get("percentages") or {}).items()
+    )
+    fallback = {
+        "marketMood": mood,
+        "riskLevel": risk_level,
+        "insight": f"Recent market headlines suggest a {mood} backdrop, so the allocation tilts according to the selected risk level.",
+        "advice": f"Stay diversified and review the plan over the next {years} year{'s' if years != 1 else ''} at an expected return of {expected_return:.1f}% p.a.",
+        "summaryText": (
+            f"Market sentiment is {mood}. Risk level is {risk_level}. "
+            f"Allocation mix: {allocation_text}. Diversify and stay invested for long-term growth."
+        ),
+        "model": "Fallback (No Groq key)",
+    }
+
+    if not GROQ_API_KEY:
+        return fallback
+
+    prompt = f"""You are a portfolio maker assistant.
+Use the market headlines, sentiment, risk level, and allocation below.
+Return ONLY valid JSON with:
+{{
+  "marketMood": "bullish|bearish|neutral",
+  "insight": "2 concise sentences",
+  "advice": "1 concise sentence",
+  "summaryText": "4 concise lines in plain English"
+}}
+
+Headlines: {json.dumps([item.get("title") for item in news_items], ensure_ascii=True)[:2500]}
+Sentiment: {json.dumps(sentiment_scores, ensure_ascii=True)}
+Risk level: {risk_level}
+Years: {years}
+Expected return: {expected_return:.2f}%
+Allocation: {json.dumps(allocation, ensure_ascii=True)}
+"""
+    result = run_groq_json(prompt)
+    if not isinstance(result, dict):
+        return fallback
+
+    return {
+        "marketMood": norm(result.get("marketMood")) or fallback["marketMood"],
+        "riskLevel": risk_level,
+        "insight": norm(result.get("insight")) or fallback["insight"],
+        "advice": norm(result.get("advice")) or fallback["advice"],
+        "summaryText": norm(result.get("summaryText")) or fallback["summaryText"],
+        "model": f"Groq ({GROQ_MODEL})",
+    }
+
+
+def build_portfolio_maker_payload(amount: float, risk_level: str, years: int, expected_return: float) -> dict[str, Any]:
+    news_items = fetch_market_news_headlines(limit=5)
+    sentiment_scores = aggregate_market_sentiment_scores(news_items)
+    allocation = build_notebook_allocation(amount, risk_level, sentiment_scores)
+    growth = build_growth_projection(amount, years, expected_return)
+    summary = build_portfolio_maker_summary(news_items, sentiment_scores, risk_level, years, expected_return, allocation)
+    return {
+        "inputs": {
+            "amount": round(amount, 2),
+            "riskLevel": risk_level,
+            "years": years,
+            "expectedReturn": round(expected_return, 2),
+        },
+        "headlines": news_items,
+        "sentimentScores": sentiment_scores,
+        "allocation": allocation,
+        "growth": growth,
+        "summary": summary,
+        "models": {
+            "sentiment": FINBERT.model_name,
+            "llm": summary.get("model") or "Fallback (No Groq key)",
+        },
+    }
+
+
+def run_portfolio_analysis(
+    holdings: list[PortfolioHolding],
+    amount: float = 50_000,
+    risk_level: str = "Moderate",
+    years: int = 10,
+    expected_return: float = 10.0,
+) -> dict[str, Any]:
+    amount = max(1_000.0, to_float(amount, 50_000.0))
+    risk_level = normalize_risk_level(risk_level)
+    years = max(1, int(to_float(years, 10)))
+    expected_return = max(0.1, to_float(expected_return, 10.0))
+    maker = build_portfolio_maker_payload(amount, risk_level, years, expected_return)
+
+    snapshots = [build_position_snapshot(h) for h in holdings]
+    snapshots = [row for row in snapshots if row.get("symbol")]
+    if not snapshots:
+        return {
+            "positions": [],
+            "summary": {
+                "totalInvested": amount,
+                "currentValue": amount,
+                "pnlUsd": 0.0,
+                "pnlPct": 0.0,
+                "portfolioScore": 5,
+                "diversificationRating": "Scenario Mode",
+                "topRisk": f"Selected risk level: {risk_level}",
+                "topOpportunity": "Use the stock sentiment page to inspect the stock sleeve before investing.",
+                "portfolioSummary": maker["summary"]["summaryText"],
+                "decisionCounts": {"BuyMore": 0, "Hold": 0, "Sell": 0},
+            },
+            "projections": {},
+            "models": {
+                "sentiment": FINBERT.model_name,
+                "advisor": maker["models"]["llm"],
+                "projection": "Expected Return Projection (Notebook-style)",
+            },
+            "maker": maker,
+        }
+
+    total_invested = round(sum(to_float(row.get("invested"), 0.0) for row in snapshots), 2)
+    total_current = round(sum(to_float(row.get("currentValue"), 0.0) for row in snapshots), 2)
+    total_pnl_usd = round(total_current - total_invested, 2)
+    total_pnl_pct = round((total_pnl_usd / total_invested) * 100, 2) if total_invested > 0 else 0.0
+
+    ai = run_portfolio_advisor_llm(snapshots, total_invested, total_current, total_pnl_pct)
+    ai_positions = ai.get("positions", {}) if isinstance(ai.get("positions"), dict) else {}
+
+    denominator = total_invested if total_invested > 0 else max(total_current, 1.0)
+    for row in snapshots:
+        row["weightPct"] = round((to_float(row["invested"], 0.0) / denominator) * 100, 2)
+        ai_row = ai_positions.get(row["symbol"], {})
+        decision = normalize_decision(ai_row.get("decision"))
+        sentiment = normalize_sentiment(ai_row.get("sentiment", row["sentimentRaw"]["label"]))
+        risk = normalize_risk(ai_row.get("risk"))
+        reason = norm(ai_row.get("reason")) or (
+            f'Sentiment is {sentiment} with score {row["sentimentRaw"]["score"]:+.3f}; '
+            f'30D change is {row["changes"]["d30"]:+.2f}% and volatility is {row["metrics"]["volatility"]:.1f}%.'
+        )
+        row["advisor"] = {
+            "decision": decision,
+            "risk": risk,
+            "sentiment": sentiment,
+            "reason": reason,
+            "model": f"Groq ({GROQ_MODEL})" if GROQ_API_KEY else "Fallback (No Groq key)",
+        }
+
+    decision_counts = {"BuyMore": 0, "Hold": 0, "Sell": 0}
+    for row in snapshots:
+        d = row["advisor"]["decision"]
+        decision_counts[d] = decision_counts.get(d, 0) + 1
+
+    projections = {
+        "1M": project_portfolio(snapshots, 1),
+        "6M": project_portfolio(snapshots, 6),
+        "1Y": project_portfolio(snapshots, 12),
+    }
+
+    snapshots.sort(key=lambda x: to_float(x.get("invested"), 0.0), reverse=True)
+
+    return {
+        "positions": snapshots,
+        "summary": {
+            "totalInvested": total_invested,
+            "currentValue": total_current,
+            "pnlUsd": total_pnl_usd,
+            "pnlPct": total_pnl_pct,
+            "portfolioScore": int(to_float(ai.get("portfolio_score"), 5)),
+            "diversificationRating": norm(ai.get("diversification_rating")) or "Fair",
+            "topRisk": norm(ai.get("top_risk")) or "Concentration and volatility risk",
+            "topOpportunity": norm(ai.get("top_opportunity")) or "Incremental adds on strongest risk-adjusted names",
+            "portfolioSummary": norm(ai.get("portfolio_summary")) or "Portfolio analysis generated.",
+            "decisionCounts": decision_counts,
+        },
+        "projections": projections,
+        "models": {
+            "sentiment": FINBERT.model_name,
+            "advisor": f"Groq ({GROQ_MODEL})" if GROQ_API_KEY else "Fallback (No Groq key)",
+            "projection": "Monte Carlo (Notebook-style)",
+        },
+        "maker": maker,
+    }
+
+
+def run_portfolio_chat(question: str, analysis: dict[str, Any], holdings: list[PortfolioHolding]) -> dict[str, Any]:
+    maker = (analysis or {}).get("maker", {}) if isinstance(analysis, dict) else {}
+    context = {
+        "positions": [
+            {
+                "symbol": norm(h.symbol).upper(),
+                "shares": h.shares,
+                "avgBuyPrice": h.avgBuyPrice,
+                "assetType": h.assetType,
+                "sector": h.sector,
+            }
+            for h in holdings
+        ],
+        "summary": (analysis or {}).get("summary", {}),
+        "maker": {
+            "inputs": maker.get("inputs", {}),
+            "sentimentScores": maker.get("sentimentScores", {}),
+            "allocation": maker.get("allocation", {}),
+            "summary": maker.get("summary", {}),
+            "models": maker.get("models", {}),
+        },
+    }
+
+    if not GROQ_API_KEY:
+        return {
+            "answer": "Groq API key is missing. Add GROQ_API_KEY to enable portfolio chatbot responses.",
+            "model": "Fallback (No Groq key)",
+        }
+
+    prompt = f"""You are a portfolio advisor assistant.
+Question: {norm(question)}
+Portfolio context (JSON): {json.dumps(context, ensure_ascii=True)[:5000]}
+
+Answer in practical plain English in 4-8 bullet points.
+If this is a scenario without saved holdings, answer using the maker inputs, market mood, and allocation plan.
+Mention model uncertainty and risk where relevant.
+"""
+
+    payload = post_json(
+        "https://api.groq.com/openai/v1/chat/completions",
+        {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        {
+            "model": GROQ_MODEL,
+            "temperature": 0.2,
+            "max_tokens": 700,
+            "messages": [{"role": "user", "content": prompt}],
+        },
+        timeout=45,
+    )
+
+    answer = ""
+    if isinstance(payload, dict):
+        try:
+            answer = (((payload.get("choices") or [{}])[0]).get("message") or {}).get("content") or ""
+        except Exception:
+            answer = ""
+    answer = norm(answer)
+    if not answer:
+        answer = "I could not generate a portfolio answer right now. Please try again."
+    return {"answer": answer, "model": f"Groq ({GROQ_MODEL})"}
+
+
 def format_stock_payload(symbol: str, window_days: int = 180) -> dict[str, Any]:
     ticker = symbol.upper().strip()
     quote = fetch_finnhub_quote(ticker)
@@ -656,6 +1504,25 @@ def stock_search(q: str = "") -> dict[str, Any]:
         "query": query,
         "results": search_stocks(query),
     }
+
+
+@app.post("/api/portfolio-analyze")
+def portfolio_analyze(payload: PortfolioAnalyzeRequest) -> dict[str, Any]:
+    return run_portfolio_analysis(
+        payload.holdings,
+        amount=payload.amount,
+        risk_level=payload.riskLevel,
+        years=payload.years,
+        expected_return=payload.expectedReturn,
+    )
+
+
+@app.post("/api/portfolio-chat")
+def portfolio_chat(payload: PortfolioChatRequest) -> dict[str, Any]:
+    question = norm(payload.question)
+    if not question:
+        raise HTTPException(status_code=400, detail="Question is required")
+    return run_portfolio_chat(question, payload.analysis or {}, payload.holdings)
 
 
 @app.post("/api/stock-chat")

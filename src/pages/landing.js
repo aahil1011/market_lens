@@ -8,7 +8,7 @@ export function renderLandingPage(container, user) {
   const displayName = user.displayName || user.email?.split("@")[0] || "User";
   const initials = displayName
     .split(" ")
-    .map((w) => w[0])
+    .map((word) => word[0])
     .join("")
     .slice(0, 2)
     .toUpperCase();
@@ -54,111 +54,138 @@ export function renderLandingPage(container, user) {
       </nav>
 
       <main class="landing-content">
-        <div class="landing-greeting">
-          <h1>Hello, <span>${displayName}</span></h1>
-        </div>
-        <p class="landing-tagline">Stay ahead with real-time insights from world financial markets.</p>
+        <section class="landing-hero">
+          <div class="landing-hero-copy">
+            <p class="landing-eyebrow">Notebook-Inspired Market Workspace</p>
+            <h1>Build portfolios, inspect sentiment, and question every trade in one place.</h1>
+            <p class="landing-tagline">
+              Your sketch now maps to a single dashboard: global leader news, stock sentiment, portfolio maker, and a smart advisor with a right-side chatbot.
+            </p>
+          </div>
 
-        <div class="hero-actions">
-          <div class="hero-banner">
-            <div class="hero-banner-card" id="hero-banner-news-card" tabindex="0" role="button" aria-label="View Global Leaders Financial News">
-              <div class="hero-corner-accent"></div>
-              <div class="hero-banner-inner">
-                <div class="hero-icons-row">
-                  <div class="hero-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="12" cy="12" r="10"/>
-                      <line x1="2" y1="12" x2="22" y2="12"/>
-                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
-                    </svg>
-                  </div>
-                  <div class="hero-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
-                      <polyline points="16 7 22 7 22 13"/>
-                    </svg>
-                  </div>
-                  <div class="hero-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/>
-                      <line x1="10" y1="6" x2="18" y2="6"/>
-                      <line x1="10" y1="10" x2="18" y2="10"/>
-                      <line x1="10" y1="14" x2="14" y2="14"/>
-                    </svg>
-                  </div>
+          <div class="landing-pill-row">
+            <span class="landing-pill">LLM outputs are labeled</span>
+            <span class="landing-pill">Charts beside the summary</span>
+            <span class="landing-pill">Portfolio chat on the right</span>
+          </div>
+        </section>
+
+        <section class="dashboard-shell">
+          <div class="dashboard-board">
+            <button class="dashboard-tile tile-news" id="dashboard-news-card" type="button">
+              <div class="dashboard-tile-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="2" y1="12" x2="22" y2="12"/>
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+                </svg>
+              </div>
+              <p class="dashboard-tile-kicker">Global News</p>
+              <h2>View global leaders financial news</h2>
+              <p class="dashboard-tile-copy">
+                Track leaders, read fresh headlines, and generate a market summary from the news stream.
+              </p>
+              <span class="dashboard-tile-link">Open News Desk</span>
+            </button>
+
+            <button class="dashboard-tile tile-stock" id="dashboard-stock-card" type="button">
+              <div class="dashboard-tile-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="3"/>
+                  <path d="M7 15l3-3 2 2 5-6"/>
+                </svg>
+              </div>
+              <p class="dashboard-tile-kicker">Sentiment Lab</p>
+              <h2>View stock sentiments</h2>
+              <p class="dashboard-tile-copy">
+                Search any ticker and get FinBERT sentiment, price action, verdict, source links, and Q&A.
+              </p>
+              <span class="dashboard-tile-link">Open Stock Lab</span>
+            </button>
+
+            <button class="dashboard-tile tile-maker" id="dashboard-builder-card" type="button">
+              <div class="dashboard-tile-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="4" width="18" height="16" rx="2"/>
+                  <line x1="8" y1="8" x2="16" y2="8"/>
+                  <line x1="8" y1="12" x2="16" y2="12"/>
+                  <line x1="8" y1="16" x2="13" y2="16"/>
+                </svg>
+              </div>
+              <p class="dashboard-tile-kicker">Portfolio Maker</p>
+              <h2>Build your portfolio maker workspace</h2>
+              <p class="dashboard-tile-copy">
+                Add holdings, set cost basis, and manage the portfolio builder before running the advisor.
+              </p>
+              <span class="dashboard-tile-link">Open Portfolio Maker</span>
+            </button>
+
+            <button class="dashboard-tile tile-advisor" id="dashboard-advisor-card" type="button">
+              <div class="dashboard-tile-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 17 9 11 13 15 21 7"/>
+                  <polyline points="14 7 21 7 21 14"/>
+                </svg>
+              </div>
+              <p class="dashboard-tile-kicker">Smart Advisor</p>
+              <h2>Open smart portfolio advisor</h2>
+              <p class="dashboard-tile-copy">
+                Jump straight into the advisor summary, summary charts, notebook-style insights, and right-side chatbot.
+              </p>
+              <span class="dashboard-tile-link">Open Smart Advisor</span>
+            </button>
+          </div>
+
+          <aside class="dashboard-rail">
+            <div class="dashboard-rail-panel">
+              <p class="dashboard-rail-label">Right-Side Copilot</p>
+              <h3>Your portfolio maker now opens as a guided workspace.</h3>
+              <p class="dashboard-rail-copy">
+                The smart advisor route opens the portfolio page with the AI summary in focus, while the portfolio maker route lands you on the builder form and holdings list.
+              </p>
+
+              <div class="dashboard-chat-preview">
+                <div class="dashboard-chat-bubble user">Should I rebalance this portfolio?</div>
+                <div class="dashboard-chat-bubble assistant">
+                  Open Smart Portfolio Advisor to see the summary graphs, LLM guidance, and the chat panel on the right.
                 </div>
+              </div>
 
-                <h2 class="hero-banner-title">View Global Leaders<br/>Financial News</h2>
-                <p class="hero-banner-desc">
-                  Access curated financial insights, breaking market news, and analysis from top global leaders.
-                </p>
+              <div class="dashboard-rail-actions">
+                <button class="dashboard-rail-btn" id="dashboard-rail-builder" type="button">Go To Portfolio Maker</button>
+                <button class="dashboard-rail-btn ghost" id="dashboard-rail-advisor" type="button">Go To Smart Advisor</button>
+              </div>
 
-                <div class="hero-banner-cta">
-                  Explore Now
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="5" y1="12" x2="19" y2="12"/>
-                    <polyline points="12 5 19 12 12 19"/>
-                  </svg>
+              <div class="dashboard-rail-meta">
+                <div class="dashboard-meta-card">
+                  <span>AI Routing</span>
+                  <strong>Builder + Advisor</strong>
+                </div>
+                <div class="dashboard-meta-card">
+                  <span>Summary Visuals</span>
+                  <strong>Allocation + Decisions</strong>
+                </div>
+                <div class="dashboard-meta-card">
+                  <span>Chat Position</span>
+                  <strong>Right Sidebar</strong>
                 </div>
               </div>
             </div>
-          </div>
-
-          <div class="hero-banner">
-            <div class="hero-banner-card" id="hero-banner-stock-card" tabindex="0" role="button" aria-label="View Stock Sentiments">
-              <div class="hero-corner-accent"></div>
-              <div class="hero-banner-inner">
-                <div class="hero-icons-row">
-                  <div class="hero-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <rect x="3" y="3" width="18" height="18" rx="3"/>
-                      <path d="M7 15l3-3 2 2 5-6"/>
-                    </svg>
-                  </div>
-                  <div class="hero-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M12 1v22"/>
-                      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                    </svg>
-                  </div>
-                  <div class="hero-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                      <polyline points="7 10 12 15 17 10"/>
-                      <line x1="12" y1="15" x2="12" y2="3"/>
-                    </svg>
-                  </div>
-                </div>
-
-                <h2 class="hero-banner-title">View Stock<br/>Sentiments</h2>
-                <p class="hero-banner-desc">
-                  Search any stock, see sentiment trend, confidence, chart, AI reasoning, and final verdict.
-                </p>
-
-                <div class="hero-banner-cta">
-                  Open Sentiment
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="5" y1="12" x2="19" y2="12"/>
-                    <polyline points="12 5 19 12 12 19"/>
-                  </svg>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+          </aside>
+        </section>
 
         <div class="landing-stats">
           <div class="stat-item">
-            <div class="stat-value">50+</div>
-            <div class="stat-label">Global Leaders</div>
+            <div class="stat-value">FinBERT</div>
+            <div class="stat-label">Sentiment Engine</div>
           </div>
           <div class="stat-item">
-            <div class="stat-value">24/7</div>
-            <div class="stat-label">Live Updates</div>
+            <div class="stat-value">Groq LLM</div>
+            <div class="stat-label">Advisor Responses</div>
           </div>
           <div class="stat-item">
-            <div class="stat-value">100K+</div>
-            <div class="stat-label">Articles</div>
+            <div class="stat-value">Live Charts</div>
+            <div class="stat-label">Summary Graphs</div>
           </div>
         </div>
       </main>
@@ -173,8 +200,12 @@ export function renderLandingPage(container, user) {
     }
   });
 
-  const newsCard = document.getElementById("hero-banner-news-card");
-  const stockCard = document.getElementById("hero-banner-stock-card");
+  const newsCard = document.getElementById("dashboard-news-card");
+  const stockCard = document.getElementById("dashboard-stock-card");
+  const builderCard = document.getElementById("dashboard-builder-card");
+  const advisorCard = document.getElementById("dashboard-advisor-card");
+  const railBuilderBtn = document.getElementById("dashboard-rail-builder");
+  const railAdvisorBtn = document.getElementById("dashboard-rail-advisor");
 
   newsCard.addEventListener("click", () => {
     window.location.hash = "#news";
@@ -184,17 +215,28 @@ export function renderLandingPage(container, user) {
     window.location.hash = "#stock-sentiment";
   });
 
-  newsCard.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      newsCard.click();
-    }
+  builderCard.addEventListener("click", () => {
+    window.location.hash = "#portfolio-advisor?focus=builder";
   });
 
-  stockCard.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      stockCard.click();
-    }
+  advisorCard.addEventListener("click", () => {
+    window.location.hash = "#portfolio-advisor?focus=advisor";
+  });
+
+  railBuilderBtn.addEventListener("click", () => {
+    window.location.hash = "#portfolio-advisor?focus=builder";
+  });
+
+  railAdvisorBtn.addEventListener("click", () => {
+    window.location.hash = "#portfolio-advisor?focus=advisor";
+  });
+
+  [newsCard, stockCard, builderCard, advisorCard].forEach((element) => {
+    element.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        element.click();
+      }
+    });
   });
 }
