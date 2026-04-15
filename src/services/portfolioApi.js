@@ -1,3 +1,5 @@
+import { apiUrl } from "./http.js";
+
 function parseErrorMessage(data, fallback) {
   if (typeof data?.detail === "string") return data.detail;
   if (typeof data?.error === "string") return data.error;
@@ -6,7 +8,7 @@ function parseErrorMessage(data, fallback) {
 
 export async function fetchPortfolioAnalysis(input) {
   const payload = Array.isArray(input) ? { holdings: input } : input;
-  const res = await fetch("/api/portfolio-analyze", {
+  const res = await fetch(apiUrl("/api/portfolio-analyze"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -20,7 +22,7 @@ export async function fetchPortfolioAnalysis(input) {
 }
 
 export async function askPortfolioQuestion({ holdings, question, analysis }) {
-  const res = await fetch("/api/portfolio-chat", {
+  const res = await fetch(apiUrl("/api/portfolio-chat"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ holdings, question, analysis }),

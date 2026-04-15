@@ -330,6 +330,7 @@ export function renderNewsPage(container, user) {
     }
     leader.loading = false;
     renderLeaders();
+    updateGenerateBtn();
 
     // Reset
     searchInput.value = "";

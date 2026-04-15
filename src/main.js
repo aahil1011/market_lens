@@ -82,3 +82,52 @@ window.addEventListener("hashchange", () => {
     route();
   }
 });
+
+// --- Theme Toggle Implementation ---
+function initTheme() {
+  const savedTheme = localStorage.getItem("theme");
+  if (savedTheme) {
+    document.documentElement.setAttribute("data-theme", savedTheme);
+  } else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+    document.documentElement.setAttribute("data-theme", "dark");
+  } else {
+    document.documentElement.setAttribute("data-theme", "light");
+  }
+
+  const toggleBtn = document.createElement("button");
+  toggleBtn.innerHTML = "🌓";
+  toggleBtn.style.position = "fixed";
+  toggleBtn.style.bottom = "20px";
+  toggleBtn.style.right = "20px";
+  toggleBtn.style.zIndex = "9999";
+  toggleBtn.style.width = "48px";
+  toggleBtn.style.height = "48px";
+  toggleBtn.style.borderRadius = "var(--radius-full)";
+  toggleBtn.style.background = "var(--bg-card)";
+  toggleBtn.style.color = "var(--text-primary)";
+  toggleBtn.style.border = "1px solid var(--border-subtle)";
+  toggleBtn.style.boxShadow = "var(--shadow-lg)";
+  toggleBtn.style.display = "flex";
+  toggleBtn.style.alignItems = "center";
+  toggleBtn.style.justifyContent = "center";
+  toggleBtn.style.fontSize = "24px";
+  toggleBtn.style.cursor = "pointer";
+  toggleBtn.title = "Toggle Light/Dark Mode";
+
+  toggleBtn.addEventListener("mouseenter", () => {
+    toggleBtn.style.background = "var(--bg-glass-hover)";
+  });
+  toggleBtn.addEventListener("mouseleave", () => {
+    toggleBtn.style.background = "var(--bg-card)";
+  });
+
+  toggleBtn.addEventListener("click", () => {
+    let currentTheme = document.documentElement.getAttribute("data-theme");
+    let newTheme = currentTheme === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", newTheme);
+    localStorage.setItem("theme", newTheme);
+  });
+
+  document.body.appendChild(toggleBtn);
+}
+initTheme();

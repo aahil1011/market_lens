@@ -2,6 +2,50 @@ import { askPortfolioQuestion, fetchPortfolioAnalysis } from "../services/portfo
 import { renderPortfolioAdvisorNotebookPage } from "./portfolioAdvisorView.js";
 
 const PIE_COLORS = ["#7dd3fc", "#f59e0b", "#34d399", "#c084fc"];
+const PORTFOLIO_RISK_BANDS = {
+  Low: { minReturn: 6, maxReturn: 10, defaultReturn: 8 },
+  Medium: { minReturn: 10, maxReturn: 15, defaultReturn: 12 },
+  High: { minReturn: 15, maxReturn: 20, defaultReturn: 17 },
+};
+
+function normalizeRiskLevel(value = "Medium") {
+  const text = String(value || "").trim().toLowerCase();
+  if (text.includes("high")) return "High";
+  if (text.includes("low")) return "Low";
+  return "Medium";
+}
+
+function getRiskBand(riskLevel) {
+  return PORTFOLIO_RISK_BANDS[normalizeRiskLevel(riskLevel)] || PORTFOLIO_RISK_BANDS.Medium;
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function formatRiskReturnValue(value) {
+  return Number(value).toFixed(1).replace(/\.0$/, "");
+}
+
+function syncExpectedReturnInput(riskInput, returnInput, preferDefault = false) {
+  const riskLevel = normalizeRiskLevel(riskInput?.value || "Medium");
+  const band = getRiskBand(riskLevel);
+  if (riskInput && riskInput.value !== riskLevel) {
+    riskInput.value = riskLevel;
+  }
+  if (returnInput) {
+    const current = Number(returnInput.value);
+    const next = preferDefault
+      ? band.defaultReturn
+      : (Number.isFinite(current) ? clampNumber(current, band.minReturn, band.maxReturn) : band.defaultReturn);
+    returnInput.min = String(band.minReturn);
+    returnInput.max = String(band.maxReturn);
+    returnInput.step = "0.1";
+    returnInput.value = formatRiskReturnValue(next);
+    returnInput.title = `${riskLevel} risk benchmark: ${band.minReturn}% to ${band.maxReturn}% expected annual return.`;
+  }
+  return { riskLevel, band };
+}
 
 /**
  * Render portfolio page.
@@ -84,7 +128,7 @@ function renderPortfolioBuilderPage(container, user, options = {}) {
               <label class="portfolio-field">
                 <span>Risk level</span>
                 <select id="portfolio-risk-input">
-                  <option value="Moderate">Moderate</option>
+                  <option value="Medium">Medium</option>
                   <option value="High">High</option>
                   <option value="Low">Low</option>
                 </select>
@@ -95,7 +139,7 @@ function renderPortfolioBuilderPage(container, user, options = {}) {
               </label>
               <label class="portfolio-field">
                 <span>Expected return p.a.</span>
-                <input id="portfolio-return-input" type="number" min="0.1" max="100" step="0.1" value="10" />
+                <input id="portfolio-return-input" type="number" min="10" max="15" step="0.1" value="12" />
               </label>
             </div>
 
@@ -252,6 +296,11 @@ function renderPortfolioBuilderPage(container, user, options = {}) {
   const chatInput = document.getElementById("portfolio-chat-input");
   const chatSendBtn = document.getElementById("portfolio-chat-send-btn");
 
+  riskInput.addEventListener("change", () => {
+    syncExpectedReturnInput(riskInput, returnInput, true);
+  });
+  syncExpectedReturnInput(riskInput, returnInput, true);
+
   document.getElementById("portfolio-back-btn").addEventListener("click", () => {
     window.location.hash = "";
   });
@@ -305,14 +354,19 @@ function renderPortfolioBuilderPage(container, user, options = {}) {
   function readScenario() {
     const amount = Number(amountInput.value);
     const years = Number(yearsInput.value);
+    const { riskLevel, band } = syncExpectedReturnInput(riskInput, returnInput);
     const expectedReturn = Number(returnInput.value);
+    const clampedReturn = Number.isFinite(expectedReturn)
+      ? clampNumber(expectedReturn, band.minReturn, band.maxReturn)
+      : band.defaultReturn;
+    returnInput.value = formatRiskReturnValue(clampedReturn);
 
     return {
       holdings: [],
       amount: Number.isFinite(amount) ? Math.max(1000, amount) : 50000,
-      riskLevel: String(riskInput.value || "Moderate"),
+      riskLevel,
       years: Number.isFinite(years) ? Math.max(1, years) : 10,
-      expectedReturn: Number.isFinite(expectedReturn) ? Math.max(0.1, expectedReturn) : 10,
+      expectedReturn: clampedReturn,
     };
   }
 
@@ -378,7 +432,7 @@ function renderPortfolioBuilderPage(container, user, options = {}) {
         </div>
         <div class="portfolio-stat-card">
           <span>Risk</span>
-          <strong>${escapeHtml(inputs.riskLevel || "Moderate")}</strong>
+          <strong>${escapeHtml(inputs.riskLevel || "Medium")}</strong>
         </div>
         <div class="portfolio-stat-card">
           <span>Years</span>
@@ -488,7 +542,7 @@ function renderPortfolioBuilderPage(container, user, options = {}) {
       <div class="portfolio-pie-wrap">
         <div class="portfolio-pie-chart" style="background: conic-gradient(${gradient})">
           <div class="portfolio-pie-hole">
-            <strong>${escapeHtml(maker?.inputs?.riskLevel || "Moderate")}</strong>
+            <strong>${escapeHtml(maker?.inputs?.riskLevel || "Medium")}</strong>
             <span>Risk</span>
           </div>
         </div>
@@ -523,6 +577,7 @@ function renderPortfolioBuilderPage(container, user, options = {}) {
   function renderSummary(maker) {
     const summary = maker?.summary || {};
     const percentages = maker?.allocation?.percentages || {};
+    const portfolioExplanation = maker?.allocation?.explanation || "No explanation generated.";
     const allocationText = Object.entries(percentages)
       .map(([label, value]) => `${label}: ${Number(value || 0).toFixed(1)}%`)
       .join(", ");
@@ -536,7 +591,7 @@ function renderPortfolioBuilderPage(container, user, options = {}) {
         </div>
         <div class="portfolio-summary-row">
           <strong>Risk Level</strong>
-          <span>${escapeHtml(maker?.inputs?.riskLevel || "Moderate")}</span>
+          <span>${escapeHtml(maker?.inputs?.riskLevel || "Medium")}</span>
         </div>
         <div class="portfolio-summary-row">
           <strong>Allocation</strong>
@@ -544,14 +599,14 @@ function renderPortfolioBuilderPage(container, user, options = {}) {
         </div>
         <div class="portfolio-summary-row">
           <strong>Insight</strong>
-          <span>${escapeHtml(summary.insight || "No insight generated.")}</span>
+          <span>${escapeHtml(summary.insight || portfolioExplanation)}</span>
         </div>
         <div class="portfolio-summary-row">
           <strong>Advice</strong>
-          <span>${escapeHtml(summary.advice || "No advice generated.")}</span>
+          <span>${escapeHtml(summary.advice || maker?.allocation?.principle || "No advice generated.")}</span>
         </div>
       </div>
-      <p class="portfolio-summary-text">${escapeHtml(summary.summaryText || "No summary generated.")}</p>
+      <p class="portfolio-summary-text">${escapeHtml(summary.summaryText || portfolioExplanation)}</p>
     `;
   }
 
@@ -702,7 +757,7 @@ function renderPortfolioAdvisorPage(container, user, options = {}) {
               <label class="portfolio-field">
                 <span>Risk level</span>
                 <select id="advisor-risk-input">
-                  <option value="Moderate">Moderate</option>
+                  <option value="Medium">Medium</option>
                   <option value="High">High</option>
                   <option value="Low">Low</option>
                 </select>
@@ -713,7 +768,7 @@ function renderPortfolioAdvisorPage(container, user, options = {}) {
               </label>
               <label class="portfolio-field">
                 <span>Expected return p.a.</span>
-                <input id="advisor-return-input" type="number" min="0.1" max="100" step="0.1" value="10" />
+                <input id="advisor-return-input" type="number" min="10" max="15" step="0.1" value="12" />
               </label>
             </div>
 
@@ -882,6 +937,11 @@ function renderPortfolioAdvisorPage(container, user, options = {}) {
   const chatInput = document.getElementById("advisor-chat-input");
   const chatSendBtn = document.getElementById("advisor-chat-send-btn");
 
+  riskInput.addEventListener("change", () => {
+    syncExpectedReturnInput(riskInput, returnInput, true);
+  });
+  syncExpectedReturnInput(riskInput, returnInput, true);
+
   document.getElementById("portfolio-advisor-back-btn").addEventListener("click", () => {
     window.location.hash = "";
   });
@@ -935,14 +995,19 @@ function renderPortfolioAdvisorPage(container, user, options = {}) {
   function readScenario() {
     const amount = Number(amountInput.value);
     const years = Number(yearsInput.value);
+    const { riskLevel, band } = syncExpectedReturnInput(riskInput, returnInput);
     const expectedReturn = Number(returnInput.value);
+    const clampedReturn = Number.isFinite(expectedReturn)
+      ? clampNumber(expectedReturn, band.minReturn, band.maxReturn)
+      : band.defaultReturn;
+    returnInput.value = formatRiskReturnValue(clampedReturn);
 
     return {
       holdings: [],
       amount: Number.isFinite(amount) ? Math.max(1000, amount) : 50000,
-      riskLevel: String(riskInput.value || "Moderate"),
+      riskLevel,
       years: Number.isFinite(years) ? Math.max(1, years) : 10,
-      expectedReturn: Number.isFinite(expectedReturn) ? Math.max(0.1, expectedReturn) : 10,
+      expectedReturn: clampedReturn,
     };
   }
 
@@ -1012,7 +1077,7 @@ function renderPortfolioAdvisorPage(container, user, options = {}) {
         </div>
         <div class="portfolio-summary-row">
           <strong>Risk Level</strong>
-          <span>${escapeHtml(maker?.inputs?.riskLevel || "Moderate")}</span>
+          <span>${escapeHtml(maker?.inputs?.riskLevel || "Medium")}</span>
         </div>
         <div class="portfolio-summary-row">
           <strong>Portfolio Score</strong>
@@ -1125,7 +1190,7 @@ function renderPortfolioAdvisorPage(container, user, options = {}) {
       <div class="portfolio-pie-wrap">
         <div class="portfolio-pie-chart" style="background: conic-gradient(${gradient})">
           <div class="portfolio-pie-hole">
-            <strong>${escapeHtml(maker?.inputs?.riskLevel || "Moderate")}</strong>
+            <strong>${escapeHtml(maker?.inputs?.riskLevel || "Medium")}</strong>
             <span>Risk</span>
           </div>
         </div>
@@ -1208,7 +1273,7 @@ function renderPortfolioAdvisorPage(container, user, options = {}) {
         </div>
         <div class="portfolio-stat-card">
           <span>Risk</span>
-          <strong>${escapeHtml(inputs.riskLevel || "Moderate")}</strong>
+          <strong>${escapeHtml(inputs.riskLevel || "Medium")}</strong>
         </div>
         <div class="portfolio-stat-card">
           <span>Years</span>

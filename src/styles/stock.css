@@ -246,6 +246,13 @@
   margin-top: 4px;
 }
 
+.stock-inline-note {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  margin-top: -6px;
+}
+
 .stock-body-text {
   color: var(--text-secondary);
   font-size: 0.9rem;
@@ -414,6 +421,104 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.stock-bullrun-head {
+  align-items: flex-start;
+}
+
+.stock-bullrun-head .stock-card-title {
+  margin-bottom: 4px;
+}
+
+.stock-bullrun-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stock-bullrun-item {
+  display: block;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-subtle);
+  padding: 12px;
+  transition: transform var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.stock-bullrun-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(110, 231, 183, 0.35);
+  background: rgba(22, 32, 75, 0.92);
+}
+
+.stock-bullrun-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.stock-bullrun-symbol {
+  color: var(--text-primary);
+  font-weight: 800;
+  font-size: 0.92rem;
+  letter-spacing: 0.02em;
+}
+
+.stock-bullrun-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.stock-bullrun-side small {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stock-bullrun-return {
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.stock-bullrun-return.up {
+  color: #6ee7b7;
+}
+
+.stock-bullrun-return.down {
+  color: #fca5a5;
+}
+
+.stock-bullrun-stats {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stock-bullrun-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: var(--radius-full);
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.stock-bullrun-reason {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 0.79rem;
+  line-height: 1.5;
 }
 
 .stock-ghost-btn {

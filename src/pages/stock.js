@@ -11,6 +11,7 @@ import {
   askStockQuestion,
   fetchStockSentiment,
   fetchStockSuggestions,
+  fetchTrendingBullRunStocks,
 } from "../services/stockApi.js";
 
 /**
@@ -32,6 +33,7 @@ export function renderStockPage(container, user, options = {}) {
   let activeSuggestionIndex = -1;
   let suggestTimer = null;
   let analyzeRequestId = 0;
+  let trendingBullRun = [];
 
   container.innerHTML = /* html */ `
     <div class="stock-page">
@@ -139,6 +141,16 @@ export function renderStockPage(container, user, options = {}) {
           </section>
 
           <aside class="stock-right">
+            <article class="stock-card stock-bullrun-card">
+              <div class="stock-right-head stock-bullrun-head">
+                <div>
+                  <h3 class="stock-card-title">Trending Bull Run Stocks</h3>
+                  <p class="stock-inline-note" id="stock-bullrun-meta">Loading 12M estimates...</p>
+                </div>
+              </div>
+              <div class="stock-bullrun-list" id="stock-bullrun-list"></div>
+            </article>
+
             <article class="stock-card">
               <div class="stock-right-head">
                 <h3 class="stock-card-title">My Portfolio</h3>
@@ -173,6 +185,8 @@ export function renderStockPage(container, user, options = {}) {
   const chatSendBtn = document.getElementById("stock-chat-send-btn");
   const timeframeWrap = document.getElementById("stock-timeframe");
   const chartMetaEl = document.getElementById("stock-chart-meta");
+  const bullRunMetaEl = document.getElementById("stock-bullrun-meta");
+  const bullRunListEl = document.getElementById("stock-bullrun-list");
 
   backBtn.addEventListener("click", () => {
     window.location.hash = "";
@@ -463,6 +477,66 @@ export function renderStockPage(container, user, options = {}) {
         `
       )
       .join("");
+  }
+
+  function getStockPageUrl(symbol) {
+    return `${window.location.origin}/#stock-sentiment?symbol=${encodeURIComponent(symbol)}`;
+  }
+
+  function renderBullRunStocks() {
+    if (!trendingBullRun.length) {
+      bullRunListEl.innerHTML = `<p class="stock-muted-text">No bullish stock ideas available right now.</p>`;
+      return;
+    }
+
+    bullRunListEl.innerHTML = trendingBullRun
+      .map((item) => {
+        const symbol = String(item.symbol || "").toUpperCase();
+        const expectedReturn = Number(item.expectedReturnPct || 0);
+        const change30d = Number(item.change30dPct || 0);
+        const dayChange = Number(item.dayChangePct || 0);
+        const bullScore = Number(item.bullScore || 0);
+        const trendClass = expectedReturn >= 0 ? "up" : "down";
+        const trendLabel = String(item.trendLabel || "watchlist");
+        const momentumLabel = Math.abs(change30d) > 0.05 ? "30D" : "Today";
+        const momentumValue = momentumLabel === "30D" ? change30d : dayChange;
+        return `
+          <a class="stock-bullrun-item" href="${getStockPageUrl(symbol)}" target="_blank" rel="noopener noreferrer">
+            <div class="stock-bullrun-top">
+              <div>
+                <p class="stock-bullrun-symbol">${symbol}</p>
+                <p class="stock-muted-text">${escapeHtml(item.name || symbol)}</p>
+              </div>
+              <div class="stock-bullrun-side">
+                <span class="stock-bullrun-return ${trendClass}">+${expectedReturn.toFixed(1)}%</span>
+                <small>Expected</small>
+              </div>
+            </div>
+            <div class="stock-bullrun-stats">
+              <span class="stock-bullrun-pill">${escapeHtml(capitalize(trendLabel))}</span>
+              <span class="stock-bullrun-pill">${momentumLabel} ${momentumValue >= 0 ? "+" : ""}${momentumValue.toFixed(1)}%</span>
+              <span class="stock-bullrun-pill">Score ${bullScore.toFixed(0)}</span>
+            </div>
+            <p class="stock-bullrun-reason">${escapeHtml(item.reason || "Positive momentum and sentiment inputs.")}</p>
+          </a>
+        `;
+      })
+      .join("");
+  }
+
+  async function loadBullRunStocks() {
+    bullRunMetaEl.textContent = "Loading 12M estimates...";
+    bullRunListEl.innerHTML = `<p class="stock-muted-text">Scanning for bullish momentum...</p>`;
+    try {
+      const payload = await fetchTrendingBullRunStocks(5);
+      trendingBullRun = Array.isArray(payload.items) ? payload.items : [];
+      bullRunMetaEl.textContent = `${payload.horizon || "12M estimate"} | Click a stock to open it in a new tab`;
+      renderBullRunStocks();
+    } catch (err) {
+      trendingBullRun = [];
+      bullRunMetaEl.textContent = "12M estimate | market scan unavailable";
+      bullRunListEl.innerHTML = `<p class="stock-muted-text">Could not load bullish stock ideas: ${escapeHtml(err.message || "Unknown error")}.</p>`;
+    }
   }
 
   function destroyChart() {
@@ -795,6 +869,7 @@ export function renderStockPage(container, user, options = {}) {
   }
 
   setActiveTimeframe(selectedWindowDays);
+  loadBullRunStocks();
   loadPortfolio();
 
   const initialSymbol = String(options?.symbol || "").trim().toUpperCase();
@@ -855,4 +930,19 @@ function formatDateFromUnix(unixTime) {
   } catch {
     return "";
   }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function capitalize(value) {
+  const text = String(value ?? "");
+  if (!text) return "";
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

@@ -24,11 +24,24 @@ def env(*keys: str) -> str:
     return ""
 
 
+def env_list(*keys: str) -> list[str]:
+    raw = env(*keys)
+    if not raw:
+        return []
+    return [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+
+
 FINNHUB_API_KEY = env("FINNHUB_API_KEY")
 GNEWS_API_KEY = env("GNEWS_API_KEY", "VITE_GNEWS_API_KEY")
+HF_API_TOKEN = env("HF_API_TOKEN", "VITE_HF_API_TOKEN")
 GROQ_API_KEY = env("GROQ_API_KEY")
 GROQ_MODEL = env("GROQ_MODEL") or "llama-3.3-70b-versatile"
-FINBERT_MODEL = "ProsusAI/finbert"
+FINBERT_MODEL = "./backend/lora-finbert"
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+BACKEND_CORS_ORIGINS = env_list("BACKEND_CORS_ORIGINS", "CORS_ORIGINS") or DEFAULT_CORS_ORIGINS
 
 POSITIVE_WORDS = [
     "surge",
@@ -56,6 +69,108 @@ NEGATIVE_WORDS = [
     "loss",
 ]
 
+ANALYSIS_POSITIVE_WORDS = [
+    "surge",
+    "rises",
+    "rise",
+    "rose",
+    "gain",
+    "gained",
+    "rally",
+    "rallied",
+    "soars",
+    "soar",
+    "jumps",
+    "jump",
+    "boosts",
+    "boost",
+    "record",
+    "high",
+    "growth",
+    "grows",
+    "bull",
+    "bullish",
+    "recover",
+    "rebound",
+    "optimism",
+    "strong",
+    "outperform",
+    "beats",
+    "beat",
+    "profitable",
+]
+
+ANALYSIS_NEGATIVE_WORDS = [
+    "fall",
+    "falls",
+    "fell",
+    "drop",
+    "drops",
+    "dropped",
+    "decline",
+    "declined",
+    "crash",
+    "crashes",
+    "crashed",
+    "slump",
+    "slumps",
+    "plunge",
+    "plunges",
+    "bear",
+    "bearish",
+    "recession",
+    "fear",
+    "sell-off",
+    "loss",
+    "losses",
+    "weak",
+    "underperform",
+    "miss",
+    "missed",
+    "warning",
+    "risk",
+    "cut",
+]
+
+ANALYSIS_COMMODITY_MAP: dict[str, dict[str, list[str]]] = {
+    "Gold": {"keywords": ["gold", "bullion", "precious metal", "xau"]},
+    "Silver": {"keywords": ["silver", "xag"]},
+    "Oil": {"keywords": ["oil", "crude", "petroleum", "opec", "brent", "wti"]},
+    "Natural Gas": {"keywords": ["natural gas", "lng", "gas price"]},
+    "Crypto": {"keywords": ["bitcoin", "btc", "ethereum", "eth", "crypto", "digital asset"]},
+    "Wheat": {"keywords": ["wheat", "grain", "corn", "soybean"]},
+    "Copper": {"keywords": ["copper", "industrial metal"]},
+    "Real Estate": {"keywords": ["real estate", "housing", "property", "reit", "mortgage"]},
+    "Bonds": {"keywords": ["bond", "bonds", "treasury", "yield", "fixed income"]},
+}
+
+ANALYSIS_SECTOR_MAP: dict[str, dict[str, list[str]]] = {
+    "Information Technology": {
+        "keywords": ["tech", "technology", "software", "semiconductor", "chip", "ai", "cloud", "nasdaq", "apple", "google", "microsoft", "meta", "nvidia"]
+    },
+    "Energy": {
+        "keywords": ["energy", "oil", "gas", "petroleum", "solar", "wind", "exxon", "opec", "crude"]
+    },
+    "Financials": {
+        "keywords": ["bank", "banking", "financial", "insurance", "fed", "federal reserve", "interest rate", "credit", "jpmorgan", "goldman"]
+    },
+    "Crypto / Digital Assets": {
+        "keywords": ["bitcoin", "crypto", "ethereum", "blockchain", "defi", "coinbase", "binance"]
+    },
+    "Commodities": {
+        "keywords": ["commodity", "commodities", "gold", "silver", "copper", "wheat", "corn", "raw material"]
+    },
+    "Real Estate": {
+        "keywords": ["real estate", "housing", "property", "mortgage", "reit", "construction"]
+    },
+    "Consumer / Retail": {
+        "keywords": ["retail", "consumer", "spending", "amazon", "walmart", "ecommerce", "sales"]
+    },
+    "Healthcare / Pharma": {
+        "keywords": ["health", "pharma", "drug", "fda", "biotech", "vaccine", "hospital"]
+    },
+}
+
 POPULAR_STOCKS = [
     {"symbol": "AAPL", "name": "Apple Inc", "exchange": "US"},
     {"symbol": "MSFT", "name": "Microsoft Corp", "exchange": "US"},
@@ -76,6 +191,61 @@ POPULAR_STOCKS = [
     {"symbol": "HDFCBANK.NS", "name": "HDFC Bank", "exchange": "NSE"},
     {"symbol": "SBIN.NS", "name": "State Bank of India", "exchange": "NSE"},
 ]
+
+TRENDING_BULL_RUN_CANDIDATES = [
+    {"symbol": "NVDA", "name": "NVIDIA Corp"},
+    {"symbol": "MSFT", "name": "Microsoft Corp"},
+    {"symbol": "AAPL", "name": "Apple Inc"},
+    {"symbol": "AMZN", "name": "Amazon.com Inc"},
+    {"symbol": "META", "name": "Meta Platforms Inc"},
+    {"symbol": "GOOGL", "name": "Alphabet Inc"},
+]
+
+TRENDING_BULL_RUN_CACHE: dict[str, Any] = {
+    "expiresAt": datetime(1970, 1, 1, tzinfo=timezone.utc),
+    "items": [],
+}
+
+PORTFOLIO_RISK_PROFILES: dict[str, dict[str, Any]] = {
+    "Low": {
+        "allocationBase": {"Stocks": 20.0, "Bonds": 60.0, "Gold": 15.0, "Cash": 5.0},
+        "allocationTilt": {"Stocks": 4.0, "Bonds": -3.0, "Gold": -1.0, "Cash": 0.0},
+        "allocationRanges": {"Stocks": (10.0, 30.0), "Bonds": (50.0, 70.0), "Gold": (10.0, 20.0), "Cash": (5.0, 10.0)},
+        "expectedReturnRange": (6.0, 10.0),
+        "defaultExpectedReturn": 8.0,
+        "explanation": (
+            "This low-risk portfolio prioritizes stability with a bond-heavy allocation, a meaningful gold hedge, "
+            "and a liquidity reserve while keeping a modest equity sleeve for long-term growth."
+        ),
+    },
+    "Medium": {
+        "allocationBase": {"Stocks": 50.0, "Bonds": 35.0, "Gold": 10.0, "Cash": 5.0},
+        "allocationTilt": {"Stocks": 5.0, "Bonds": -4.0, "Gold": -1.0, "Cash": 0.0},
+        "allocationRanges": {"Stocks": (40.0, 60.0), "Bonds": (30.0, 50.0), "Gold": (5.0, 15.0), "Cash": (5.0, 10.0)},
+        "expectedReturnRange": (10.0, 15.0),
+        "defaultExpectedReturn": 12.0,
+        "explanation": (
+            "This medium-risk portfolio balances growth and stability by pairing a diversified equity core with bonds, "
+            "gold, and cash to manage drawdowns and preserve flexibility."
+        ),
+    },
+    "High": {
+        "allocationBase": {"Stocks": 70.0, "Bonds": 20.0, "Gold": 7.0, "Cash": 3.0},
+        "allocationTilt": {"Stocks": 6.0, "Bonds": -4.0, "Gold": -1.0, "Cash": -1.0},
+        "allocationRanges": {"Stocks": (60.0, 80.0), "Bonds": (10.0, 30.0), "Gold": (5.0, 10.0), "Cash": (0.0, 5.0)},
+        "expectedReturnRange": (15.0, 20.0),
+        "defaultExpectedReturn": 17.0,
+        "explanation": (
+            "This high-risk portfolio focuses on growth through equities while keeping smaller allocations to bonds, "
+            "gold, and cash for diversification, downside cushioning, and liquidity."
+        ),
+    },
+}
+
+ASSET_ALLOCATION_PRINCIPLE = (
+    "Asset allocation balances risk and return by adjusting exposure to stocks for growth and bonds for stability, "
+    "while gold hedges shocks and cash preserves liquidity."
+)
 
 
 class StockSentimentRequest(BaseModel):
@@ -100,9 +270,9 @@ class PortfolioHolding(BaseModel):
 class PortfolioAnalyzeRequest(BaseModel):
     holdings: list[PortfolioHolding] = Field(default_factory=list, max_length=60)
     amount: float = Field(default=50_000, ge=1_000, le=1_000_000_000)
-    riskLevel: str = Field(default="Moderate", min_length=3, max_length=20)
+    riskLevel: str = Field(default="Medium", min_length=3, max_length=20)
     years: int = Field(default=10, ge=1, le=40)
-    expectedReturn: float = Field(default=10.0, ge=0.1, le=100.0)
+    expectedReturn: float = Field(default=12.0, ge=0.1, le=100.0)
 
 
 class PortfolioChatRequest(BaseModel):
@@ -111,14 +281,15 @@ class PortfolioChatRequest(BaseModel):
     analysis: dict[str, Any] | None = None
 
 
+class LeaderNewsAnalysisRequest(BaseModel):
+    articles: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
 app = FastAPI(title="MarketLens Stock Backend", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=BACKEND_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -180,19 +351,33 @@ class FinBertEngine:
             return
         self.loaded = True
         try:
-            from transformers import pipeline  # type: ignore
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline  # type: ignore
+            from peft import PeftModel  # type: ignore
             import torch  # type: ignore
 
             device = 0 if torch.cuda.is_available() else -1
+            adapter_path = self.model_name  # ./backend/lora-finbert
+
+            # Load base FinBERT model, then apply LoRA adapter on top
+            base_model = AutoModelForSequenceClassification.from_pretrained(
+                "ProsusAI/finbert", num_labels=3
+            )
+            model = PeftModel.from_pretrained(base_model, adapter_path)
+            model = model.merge_and_unload()  # Merge LoRA weights into base for faster inference
+            tokenizer = AutoTokenizer.from_pretrained(adapter_path)
+
             self.pipeline = pipeline(
                 task="text-classification",
-                model=self.model_name,
+                model=model,
+                tokenizer=tokenizer,
                 top_k=None,
                 device=device,
                 truncation=True,
                 max_length=512,
             )
-        except Exception:
+            self.model_name = f"Custom LoRA FinBERT ({adapter_path})"
+        except Exception as e:
+            print(f"[FinBertEngine] Failed to load custom model: {e}")
             self.pipeline = None
             self.fallback = True
             self.model_name = "Lexical fallback (FinBERT unavailable)"
@@ -367,6 +552,249 @@ def fetch_gnews_news(symbol: str) -> list[dict[str, Any]]:
     return [i for i in out if i["title"]]
 
 
+def fetch_leader_news(leader_name: str, limit: int = 5) -> list[dict[str, Any]]:
+    if not GNEWS_API_KEY:
+        return []
+    safe_name = norm(leader_name)
+    safe_limit = max(1, min(10, int(limit or 5)))
+    payload = fetch_json(
+        "https://gnews.io/api/v4/search",
+        {
+            "q": f"{safe_name} finance OR economy OR market",
+            "lang": "en",
+            "max": safe_limit,
+            "sortby": "publishedAt",
+            "token": GNEWS_API_KEY,
+        },
+        timeout=15,
+    )
+    if not isinstance(payload, dict):
+        return []
+    items: list[dict[str, Any]] = []
+    for row in (payload.get("articles") or [])[:safe_limit]:
+        title = norm(row.get("title", ""))
+        if not title:
+            continue
+        items.append(
+            {
+                "title": title,
+                "description": norm(row.get("description", "")),
+                "url": norm(row.get("url", "")),
+                "image": norm(row.get("image", "")),
+                "publishedAt": row.get("publishedAt") or datetime.now(timezone.utc).isoformat(),
+                "source": {
+                    "name": norm(((row.get("source") or {}).get("name")) or "GNews"),
+                },
+            }
+        )
+    return items
+
+
+def extractive_summarize(text: str) -> str:
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.?!])\s+", re.sub(r"\s+", " ", text or ""))
+        if 40 < len(sentence.strip()) < 300
+    ]
+    if not sentences:
+        return norm(text)[:500]
+
+    keywords = [
+        "market",
+        "economy",
+        "stock",
+        "trade",
+        "invest",
+        "growth",
+        "inflation",
+        "dollar",
+        "rate",
+        "bank",
+        "fund",
+        "revenue",
+        "profit",
+        "loss",
+        "policy",
+        "federal",
+        "treasury",
+        "crypto",
+        "recession",
+        "bull",
+        "bear",
+        "gdp",
+        "finance",
+        "fiscal",
+        "tariff",
+        "debt",
+        "equity",
+        "index",
+        "nasdaq",
+    ]
+
+    ranked = sorted(
+        (
+            {
+                "sentence": sentence,
+                "score": sum(1 for keyword in keywords if keyword in sentence.lower()),
+            }
+            for sentence in sentences
+        ),
+        key=lambda item: item["score"],
+        reverse=True,
+    )
+    return " ".join(item["sentence"] for item in ranked[:4])
+
+
+def summarize_with_bart(text: str) -> dict[str, str]:
+    truncated = norm(text)[:3500]
+    if not truncated:
+        return {"text": "", "source": "none"}
+
+    endpoints = [
+        "https://router.huggingface.co/hf-inference/models/facebook/bart-large-cnn",
+        "https://api-inference.huggingface.co/models/facebook/bart-large-cnn",
+    ]
+
+    if HF_API_TOKEN:
+        headers = {
+            "Authorization": f"Bearer {HF_API_TOKEN}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "inputs": truncated,
+            "parameters": {"max_length": 220, "min_length": 60, "do_sample": False},
+        }
+        for url in endpoints:
+            data = post_json(url, headers, payload, timeout=10)
+            if isinstance(data, list) and data and isinstance(data[0], dict):
+                summary = norm(data[0].get("summary_text", ""))
+                if summary:
+                    return {"text": summary, "source": "bart"}
+
+    fallback = extractive_summarize(truncated)
+    return {"text": fallback, "source": "local" if fallback else "none"}
+
+
+def count_keyword_hits(text: str, words: list[str]) -> int:
+    lower_text = norm(text).lower()
+    return sum(1 for word in words if word in lower_text)
+
+
+def find_news_reasons(
+    articles: list[dict[str, Any]],
+    keywords: list[str],
+    sentiment_words: list[str],
+    max_reasons: int = 3,
+) -> list[str]:
+    reasons: list[str] = []
+    for article in articles:
+        title = norm(article.get("title", ""))
+        if not title:
+            continue
+        text = norm(f'{article.get("title", "")} {article.get("description", "")}').lower()
+        has_keyword = any(keyword in text for keyword in keywords)
+        has_sentiment = any(word in text for word in sentiment_words)
+        if has_keyword or has_sentiment:
+            reasons.append(title)
+            if len(reasons) >= max_reasons:
+                break
+    return reasons
+
+
+def build_leader_news_analysis(articles: list[dict[str, Any]]) -> dict[str, Any]:
+    cleaned_articles = [
+        {
+            "title": norm(article.get("title", "")),
+            "description": norm(article.get("description", "")),
+        }
+        for article in (articles or [])[:100]
+        if norm(article.get("title", ""))
+    ]
+
+    if not cleaned_articles:
+        return {
+            "summary": "No articles available. Follow some leaders to get started.",
+            "summarySource": "none",
+            "bullets": [],
+            "commodities": [],
+            "sectors": [],
+            "marketNature": "neutral",
+            "marketReasons": [],
+        }
+
+    combined_text = " ".join(
+        f'{article.get("title", "")}. {article.get("description", "")}' for article in cleaned_articles
+    ).strip()
+    lower_text = combined_text.lower()
+    summary = summarize_with_bart(combined_text)
+    bullets = [article.get("title", "") for article in cleaned_articles[:5] if article.get("title")]
+
+    commodities: list[dict[str, Any]] = []
+    for name, config in ANALYSIS_COMMODITY_MAP.items():
+        keywords = config.get("keywords") or []
+        if not any(keyword in lower_text for keyword in keywords):
+            continue
+        relevant_sentences = [
+            sentence
+            for sentence in re.split(r"(?<=[.?!])\s+", combined_text)
+            if any(keyword in sentence.lower() for keyword in keywords)
+        ]
+        relevant_text = " ".join(relevant_sentences).lower()
+        positive_hits = count_keyword_hits(relevant_text, ANALYSIS_POSITIVE_WORDS)
+        negative_hits = count_keyword_hits(relevant_text, ANALYSIS_NEGATIVE_WORDS)
+        direction = "up" if positive_hits > negative_hits else "down" if negative_hits > positive_hits else "neutral"
+        label = "Rising" if direction == "up" else "Falling" if direction == "down" else "Stable"
+        reason_words = ANALYSIS_POSITIVE_WORDS if direction == "up" else ANALYSIS_NEGATIVE_WORDS
+        commodities.append(
+            {
+                "name": name,
+                "direction": direction,
+                "label": label,
+                "reasons": find_news_reasons(cleaned_articles, keywords, reason_words, max_reasons=2),
+            }
+        )
+
+    sectors: list[dict[str, Any]] = []
+    for name, config in ANALYSIS_SECTOR_MAP.items():
+        keywords = config.get("keywords") or []
+        if not any(keyword in lower_text for keyword in keywords):
+            continue
+        relevant_sentences = [
+            sentence
+            for sentence in re.split(r"(?<=[.?!])\s+", combined_text)
+            if any(keyword in sentence.lower() for keyword in keywords)
+        ]
+        relevant_text = " ".join(relevant_sentences).lower()
+        positive_hits = count_keyword_hits(relevant_text, ANALYSIS_POSITIVE_WORDS)
+        negative_hits = count_keyword_hits(relevant_text, ANALYSIS_NEGATIVE_WORDS)
+        nature = "bullish" if positive_hits > negative_hits else "bearish" if negative_hits > positive_hits else "neutral"
+        reason_words = ANALYSIS_POSITIVE_WORDS if nature == "bullish" else ANALYSIS_NEGATIVE_WORDS
+        sectors.append(
+            {
+                "name": name,
+                "nature": nature,
+                "reasons": find_news_reasons(cleaned_articles, keywords, reason_words, max_reasons=2),
+            }
+        )
+
+    overall_positive = count_keyword_hits(lower_text, ANALYSIS_POSITIVE_WORDS)
+    overall_negative = count_keyword_hits(lower_text, ANALYSIS_NEGATIVE_WORDS)
+    market_nature = (
+        "bullish" if overall_positive > overall_negative else "bearish" if overall_negative > overall_positive else "neutral"
+    )
+    market_reason_words = ANALYSIS_POSITIVE_WORDS if market_nature == "bullish" else ANALYSIS_NEGATIVE_WORDS
+
+    return {
+        "summary": summary.get("text", ""),
+        "summarySource": summary.get("source", "none"),
+        "bullets": bullets,
+        "commodities": commodities,
+        "sectors": sectors,
+        "marketNature": market_nature,
+        "marketReasons": find_news_reasons(cleaned_articles, [], market_reason_words, max_reasons=3),
+    }
+
+
 def fetch_stocktwits_posts(symbol: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     data = fetch_json(
         f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json",
@@ -424,8 +852,9 @@ def search_stocks(query: str) -> list[dict[str, str]]:
                     continue
                 description = norm(row.get("description", ""))
                 exchange = norm(row.get("mic", "") or row.get("displaySymbol", ""))
-                type_name = norm(row.get("type", ""))
-                if type_name and "stock" not in type_name.lower() and "common" not in type_name.lower() and "adr" not in type_name.lower():
+                type_name = norm(row.get("type", "")).lower()
+                allowed_types = ["stock", "common", "adr", "etf", "etp", "fund", "crypto", "currency", "forex", "commodity", "dr"]
+                if type_name and not any(t in type_name for t in allowed_types):
                     continue
                 results.append(
                     {
@@ -554,6 +983,188 @@ def percentile(values: list[float], p: float) -> float:
         return float(arr[lo])
     frac = rank - lo
     return float(arr[lo] + (arr[hi] - arr[lo]) * frac)
+
+
+def dedupe_news_items(items: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
+    unique: dict[str, dict[str, Any]] = {}
+    for item in items:
+        key = (item.get("url") or item.get("title") or "").strip().lower()
+        if key and key not in unique:
+            unique[key] = item
+    ordered = sorted(
+        unique.values(),
+        key=lambda row: parse_date(row.get("publishedAt", "")).timestamp(),
+        reverse=True,
+    )
+    return ordered[:limit]
+
+
+def score_bull_run_candidate(candidate: dict[str, str]) -> dict[str, Any] | None:
+    symbol = norm(candidate.get("symbol")).upper()
+    if not symbol:
+        return None
+
+    quote = {}
+    if FINNHUB_API_KEY:
+        raw_quote = fetch_json(
+            "https://finnhub.io/api/v1/quote",
+            {"symbol": symbol, "token": FINNHUB_API_KEY},
+            timeout=6,
+        )
+        quote = raw_quote if isinstance(raw_quote, dict) else {}
+
+    candles = {}
+    if FINNHUB_API_KEY:
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        from_ts = int((datetime.now(timezone.utc) - timedelta(days=75)).timestamp())
+        raw_candles = fetch_json(
+            "https://finnhub.io/api/v1/stock/candle",
+            {
+                "symbol": symbol,
+                "resolution": "D",
+                "from": from_ts,
+                "to": now_ts,
+                "token": FINNHUB_API_KEY,
+            },
+            timeout=6,
+        )
+        if isinstance(raw_candles, dict) and raw_candles.get("s") == "ok":
+            candles = raw_candles
+
+    finnhub_news = []
+    if FINNHUB_API_KEY:
+        date_to = datetime.now(timezone.utc).date()
+        date_from = date_to - timedelta(days=7)
+        raw_news = fetch_json(
+            "https://finnhub.io/api/v1/company-news",
+            {
+                "symbol": symbol,
+                "from": date_from.isoformat(),
+                "to": date_to.isoformat(),
+                "token": FINNHUB_API_KEY,
+            },
+            timeout=6,
+        )
+        if isinstance(raw_news, list):
+            for row in raw_news[:4]:
+                finnhub_news.append(
+                    {
+                        "title": norm(row.get("headline", "")),
+                        "description": norm(row.get("summary", "")),
+                        "url": row.get("url", ""),
+                        "publishedAt": iso_from_unix(row.get("datetime")),
+                        "source": "Finnhub",
+                    }
+                )
+
+    news_items = dedupe_news_items(finnhub_news, limit=6)
+    sentiment_scores = FINBERT.score_texts(
+        [f'{item.get("title", "")}. {item.get("description", "")}' for item in news_items]
+    )
+    sentiment = aggregate_sentiment(sentiment_scores)
+
+    closes = [to_float(value, 0.0) for value in (candles.get("c") or []) if to_float(value, 0.0) > 0]
+    change_30d = safe_pct_change(closes, 30)
+    change_90d = safe_pct_change(closes, 90)
+    day_change = 0.0
+    current_price = to_float(quote.get("c"), 0.0)
+    prev_close = to_float(quote.get("pc"), 0.0)
+    if current_price > 0 and prev_close > 0:
+        day_change = round(((current_price - prev_close) / prev_close) * 100, 2)
+    elif closes:
+        current_price = closes[-1]
+
+    bull_score = 50.0
+    bull_score += clamp(change_30d, -20.0, 25.0) * 1.2
+    bull_score += clamp(change_90d, -25.0, 40.0) * 0.45
+    bull_score += clamp(day_change, -6.0, 6.0) * 0.9
+    bull_score += clamp(to_float(sentiment.get("score"), 0.0), -0.35, 0.35) * 42.0
+    bull_score = round(clamp(bull_score, 0.0, 100.0), 1)
+
+    expected_return_pct = 7.0
+    expected_return_pct += max(change_30d, 0.0) * 0.42
+    expected_return_pct += max(change_90d, 0.0) * 0.12
+    expected_return_pct += max(to_float(sentiment.get("score"), 0.0), 0.0) * 14.0
+    expected_return_pct = round(clamp(expected_return_pct, 6.0, 28.0), 1)
+
+    if current_price <= 0 and not closes and not news_items:
+        return None
+
+    trend_label = "bullish" if bull_score >= 62 else "watchlist"
+    reason_bits = []
+    if change_30d > 0:
+        reason_bits.append(f"30D momentum {change_30d:+.1f}%")
+    if change_90d > 0:
+        reason_bits.append(f"90D momentum {change_90d:+.1f}%")
+    if sentiment.get("label") == "positive":
+        reason_bits.append("positive news sentiment")
+    if not reason_bits:
+        reason_bits.append("mixed inputs but resilient price action")
+
+    return {
+        "symbol": symbol,
+        "name": norm(candidate.get("name")) or symbol,
+        "currentPrice": round(current_price, 2) if current_price > 0 else None,
+        "change30dPct": round(change_30d, 2),
+        "change90dPct": round(change_90d, 2),
+        "dayChangePct": round(day_change, 2),
+        "expectedReturnPct": expected_return_pct,
+        "trendLabel": trend_label,
+        "bullScore": bull_score,
+        "reason": ", ".join(reason_bits[:3]),
+    }
+
+
+def fallback_trending_bull_run_stocks(limit: int = 5) -> list[dict[str, Any]]:
+    fallback = [
+        {"symbol": "NVDA", "name": "NVIDIA Corp", "currentPrice": None, "change30dPct": 12.5, "change90dPct": 26.2, "dayChangePct": 1.1, "expectedReturnPct": 22.0, "trendLabel": "bullish", "bullScore": 82.0, "reason": "AI-led momentum and strong growth narrative"},
+        {"symbol": "MSFT", "name": "Microsoft Corp", "currentPrice": None, "change30dPct": 8.7, "change90dPct": 18.6, "dayChangePct": 0.8, "expectedReturnPct": 17.5, "trendLabel": "bullish", "bullScore": 76.0, "reason": "cloud and AI demand supporting trend strength"},
+        {"symbol": "AMZN", "name": "Amazon.com Inc", "currentPrice": None, "change30dPct": 7.2, "change90dPct": 16.3, "dayChangePct": 0.6, "expectedReturnPct": 16.2, "trendLabel": "bullish", "bullScore": 72.0, "reason": "consumer resilience and margin expansion tailwinds"},
+        {"symbol": "META", "name": "Meta Platforms Inc", "currentPrice": None, "change30dPct": 6.8, "change90dPct": 15.1, "dayChangePct": 0.4, "expectedReturnPct": 15.8, "trendLabel": "bullish", "bullScore": 70.0, "reason": "advertising recovery and AI platform leverage"},
+        {"symbol": "GOOGL", "name": "Alphabet Inc", "currentPrice": None, "change30dPct": 5.9, "change90dPct": 13.4, "dayChangePct": 0.3, "expectedReturnPct": 14.9, "trendLabel": "watchlist", "bullScore": 67.0, "reason": "search resilience with improving growth expectations"},
+    ]
+    return fallback[:limit]
+
+
+def get_trending_bull_run_stocks(limit: int = 5) -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
+    expires_at = TRENDING_BULL_RUN_CACHE.get("expiresAt")
+    if isinstance(expires_at, datetime) and expires_at > now and TRENDING_BULL_RUN_CACHE.get("items"):
+        return list(TRENDING_BULL_RUN_CACHE.get("items") or [])[:limit]
+
+    items: list[dict[str, Any]] = []
+    for candidate in TRENDING_BULL_RUN_CANDIDATES:
+        try:
+            row = score_bull_run_candidate(candidate)
+        except Exception:
+            row = None
+        if row:
+            items.append(row)
+
+    if not items:
+        items = fallback_trending_bull_run_stocks(limit=max(limit, 5))
+    elif len(items) < limit:
+        existing = {norm(item.get("symbol")).upper() for item in items}
+        for fallback in fallback_trending_bull_run_stocks(limit=max(limit, 5)):
+            symbol = norm(fallback.get("symbol")).upper()
+            if symbol and symbol not in existing:
+                items.append(fallback)
+                existing.add(symbol)
+            if len(items) >= limit:
+                break
+
+    items.sort(
+        key=lambda row: (
+            to_float(row.get("bullScore"), 0.0),
+            to_float(row.get("expectedReturnPct"), 0.0),
+            to_float(row.get("change30dPct"), 0.0),
+        ),
+        reverse=True,
+    )
+    top_items = items[:limit]
+    TRENDING_BULL_RUN_CACHE["expiresAt"] = now + timedelta(minutes=10)
+    TRENDING_BULL_RUN_CACHE["items"] = top_items
+    return top_items
 
 
 def normalize_decision(value: Any) -> str:
@@ -904,7 +1515,99 @@ def normalize_risk_level(value: str) -> str:
         return "High"
     if "low" in text:
         return "Low"
-    return "Moderate"
+    return "Medium"
+
+
+def clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def round_percentages_to_hundred(weights: dict[str, float]) -> dict[str, float]:
+    raw_tenths = {key: max(0.0, float(value) * 10) for key, value in weights.items()}
+    floored = {key: int(math.floor(value + 1e-9)) for key, value in raw_tenths.items()}
+    remainder = max(0, 1000 - sum(floored.values()))
+    ordering = sorted(
+        raw_tenths.keys(),
+        key=lambda key: (raw_tenths[key] - floored[key], raw_tenths[key]),
+        reverse=True,
+    )
+    for key in ordering[:remainder]:
+        floored[key] += 1
+    return {key: round(floored[key] / 10, 1) for key in weights}
+
+
+def round_amounts_to_total(amount: float, percentages: dict[str, float]) -> dict[str, float]:
+    rounded_total = round(amount, 2)
+    raw_cents = {key: rounded_total * (pct / 100) * 100 for key, pct in percentages.items()}
+    floored = {key: int(math.floor(value + 1e-9)) for key, value in raw_cents.items()}
+    remainder = max(0, int(round(rounded_total * 100)) - sum(floored.values()))
+    ordering = sorted(
+        raw_cents.keys(),
+        key=lambda key: (raw_cents[key] - floored[key], raw_cents[key]),
+        reverse=True,
+    )
+    for key in ordering[:remainder]:
+        floored[key] += 1
+    return {key: round(floored[key] / 100, 2) for key in percentages}
+
+
+def sentiment_tilt_factor(sentiment_scores: dict[str, Any] | None = None) -> float:
+    scores = sentiment_scores or {}
+    positive = to_float(scores.get("positive"), 0.0)
+    negative = to_float(scores.get("negative"), 0.0)
+    return clamp((positive - negative) / 0.2, -1.0, 1.0)
+
+
+def generatePortfolio(
+    amount: float,
+    riskLevel: str,
+    years: int,
+    sentiment_scores: dict[str, Any] | None = None,
+    requested_return: float | None = None,
+) -> dict[str, Any]:
+    risk_level = normalize_risk_level(riskLevel)
+    profile = PORTFOLIO_RISK_PROFILES[risk_level]
+    tilt_factor = sentiment_tilt_factor(sentiment_scores)
+
+    percentages_raw: dict[str, float] = {}
+    for asset, base_value in (profile.get("allocationBase") or {}).items():
+        tilt_points = to_float((profile.get("allocationTilt") or {}).get(asset), 0.0)
+        min_alloc, max_alloc = (profile.get("allocationRanges") or {}).get(asset, (0.0, 100.0))
+        adjusted = base_value + tilt_points * tilt_factor
+        percentages_raw[asset] = clamp(adjusted, float(min_alloc), float(max_alloc))
+
+    percentages = round_percentages_to_hundred(percentages_raw)
+    amounts = round_amounts_to_total(amount, percentages)
+
+    ret_min, ret_max = profile.get("expectedReturnRange") or (0.0, 100.0)
+    default_return = to_float(profile.get("defaultExpectedReturn"), (ret_min + ret_max) / 2)
+    expected_return = default_return if requested_return is None else clamp(to_float(requested_return, default_return), ret_min, ret_max)
+    expected_return = round(expected_return, 1)
+
+    sentiment_note = ""
+    if tilt_factor >= 0.2:
+        sentiment_note = " A constructive market backdrop slightly increases the equity sleeve while staying inside the selected risk band."
+    elif tilt_factor <= -0.2:
+        sentiment_note = " A cautious market backdrop slightly increases the defensive sleeve while staying inside the selected risk band."
+
+    return_range = {"min": float(ret_min), "max": float(ret_max)}
+    benchmark_ranges = {
+        asset: {"min": float(bounds[0]), "max": float(bounds[1])}
+        for asset, bounds in (profile.get("allocationRanges") or {}).items()
+    }
+
+    return {
+        "risk_level": risk_level,
+        "years": max(1, int(years)),
+        "allocation_percentages": percentages,
+        "allocation_amounts": amounts,
+        "expected_return": expected_return,
+        "expected_return_range": return_range,
+        "benchmark_ranges": benchmark_ranges,
+        "sentiment_tilt": round(tilt_factor, 3),
+        "explanation": f'{profile.get("explanation")}{sentiment_note}',
+        "principle": ASSET_ALLOCATION_PRINCIPLE,
+    }
 
 
 def fetch_market_news_headlines(limit: int = 5) -> list[dict[str, Any]]:
@@ -1003,34 +1706,29 @@ def aggregate_market_sentiment_scores(news_items: list[dict[str, Any]]) -> dict[
     }
 
 
-def build_notebook_allocation(amount: float, risk_level: str, sentiment_scores: dict[str, Any]) -> dict[str, Any]:
-    positive = to_float(sentiment_scores.get("positive"), 0.2)
-    negative = to_float(sentiment_scores.get("negative"), 0.2)
-
-    stock_weight = 0.4 + (positive - negative)
-    bond_weight = 0.3 - (positive - negative) / 2
-    gold_weight = 0.2
-    cash_weight = 0.1
-
-    if risk_level == "High":
-        stock_weight += 0.2
-        bond_weight -= 0.1
-    elif risk_level == "Low":
-        stock_weight -= 0.2
-        bond_weight += 0.2
-
-    raw_weights = {
-        "Stocks": max(stock_weight, 0.05),
-        "Bonds": max(bond_weight, 0.05),
-        "Gold": max(gold_weight, 0.05),
-        "Cash": max(cash_weight, 0.05),
-    }
-    total = sum(raw_weights.values()) or 1.0
-    percentages = {key: round((value / total) * 100, 1) for key, value in raw_weights.items()}
-    amounts = {key: round(amount * (percentages[key] / 100), 2) for key in raw_weights}
+def build_notebook_allocation(
+    amount: float,
+    risk_level: str,
+    sentiment_scores: dict[str, Any],
+    years: int,
+    requested_return: float | None = None,
+) -> dict[str, Any]:
+    portfolio = generatePortfolio(
+        amount,
+        risk_level,
+        years,
+        sentiment_scores=sentiment_scores,
+        requested_return=requested_return,
+    )
     return {
-        "percentages": percentages,
-        "amounts": amounts,
+        "percentages": portfolio["allocation_percentages"],
+        "amounts": portfolio["allocation_amounts"],
+        "expectedReturn": portfolio["expected_return"],
+        "returnRange": portfolio["expected_return_range"],
+        "benchmarkRanges": portfolio["benchmark_ranges"],
+        "explanation": portfolio["explanation"],
+        "principle": portfolio["principle"],
+        "sentimentTilt": portfolio["sentiment_tilt"],
     }
 
 
@@ -1061,14 +1759,20 @@ def build_portfolio_maker_summary(
         f"{key}: {value:.1f}%"
         for key, value in (allocation.get("percentages") or {}).items()
     )
+    portfolio_explanation = norm(allocation.get("explanation")) or (
+        "The allocation uses benchmark risk bands so equity rises with risk while bonds, gold, and cash absorb volatility."
+    )
     fallback = {
         "marketMood": mood,
         "riskLevel": risk_level,
-        "insight": f"Recent market headlines suggest a {mood} backdrop, so the allocation tilts according to the selected risk level.",
-        "advice": f"Stay diversified and review the plan over the next {years} year{'s' if years != 1 else ''} at an expected return of {expected_return:.1f}% p.a.",
+        "insight": portfolio_explanation,
+        "advice": (
+            f"{ASSET_ALLOCATION_PRINCIPLE} Review the plan over the next {years} year{'s' if years != 1 else ''} "
+            f"using an expected return benchmark of {expected_return:.1f}% p.a."
+        ),
         "summaryText": (
-            f"Market sentiment is {mood}. Risk level is {risk_level}. "
-            f"Allocation mix: {allocation_text}. Diversify and stay invested for long-term growth."
+            f"Market sentiment is {mood}. Risk level is {risk_level}. {portfolio_explanation} "
+            f"Allocation mix: {allocation_text}. Expected return benchmark: {expected_return:.1f}% p.a."
         ),
         "model": "Fallback (No Groq key)",
     }
@@ -1078,6 +1782,7 @@ def build_portfolio_maker_summary(
 
     prompt = f"""You are a portfolio maker assistant.
 Use the market headlines, sentiment, risk level, and allocation below.
+The allocation and expected return are already benchmarked and must be treated as ground truth.
 Return ONLY valid JSON with:
 {{
   "marketMood": "bullish|bearish|neutral",
@@ -1092,6 +1797,8 @@ Risk level: {risk_level}
 Years: {years}
 Expected return: {expected_return:.2f}%
 Allocation: {json.dumps(allocation, ensure_ascii=True)}
+Explanation: {portfolio_explanation}
+Principle: {ASSET_ALLOCATION_PRINCIPLE}
 """
     result = run_groq_json(prompt)
     if not isinstance(result, dict):
@@ -1110,7 +1817,14 @@ Allocation: {json.dumps(allocation, ensure_ascii=True)}
 def build_portfolio_maker_payload(amount: float, risk_level: str, years: int, expected_return: float) -> dict[str, Any]:
     news_items = fetch_market_news_headlines(limit=5)
     sentiment_scores = aggregate_market_sentiment_scores(news_items)
-    allocation = build_notebook_allocation(amount, risk_level, sentiment_scores)
+    allocation = build_notebook_allocation(
+        amount,
+        risk_level,
+        sentiment_scores,
+        years=years,
+        requested_return=expected_return,
+    )
+    expected_return = to_float(allocation.get("expectedReturn"), expected_return)
     growth = build_growth_projection(amount, years, expected_return)
     summary = build_portfolio_maker_summary(news_items, sentiment_scores, risk_level, years, expected_return, allocation)
     return {
@@ -1135,14 +1849,14 @@ def build_portfolio_maker_payload(amount: float, risk_level: str, years: int, ex
 def run_portfolio_analysis(
     holdings: list[PortfolioHolding],
     amount: float = 50_000,
-    risk_level: str = "Moderate",
+    risk_level: str = "Medium",
     years: int = 10,
-    expected_return: float = 10.0,
+    expected_return: float = 12.0,
 ) -> dict[str, Any]:
     amount = max(1_000.0, to_float(amount, 50_000.0))
     risk_level = normalize_risk_level(risk_level)
     years = max(1, int(to_float(years, 10)))
-    expected_return = max(0.1, to_float(expected_return, 10.0))
+    expected_return = to_float(expected_return, PORTFOLIO_RISK_PROFILES[risk_level]["defaultExpectedReturn"])
     maker = build_portfolio_maker_payload(amount, risk_level, years, expected_return)
 
     snapshots = [build_position_snapshot(h) for h in holdings]
@@ -1480,6 +2194,7 @@ def health() -> dict[str, Any]:
         "providers": {
             "finnhub": bool(FINNHUB_API_KEY),
             "gnews": bool(GNEWS_API_KEY),
+            "huggingface": bool(HF_API_TOKEN),
             "groq": bool(GROQ_API_KEY),
         },
         "models": {
@@ -1497,12 +2212,43 @@ def stock_sentiment(payload: StockSentimentRequest) -> dict[str, Any]:
     return format_stock_payload(symbol, window_days=payload.windowDays)
 
 
+@app.get("/api/leader-news")
+def leader_news(name: str = "", limit: int = 5) -> dict[str, Any]:
+    leader_name = norm(name)
+    if not leader_name:
+        raise HTTPException(status_code=400, detail="Leader name is required")
+    if not GNEWS_API_KEY:
+        raise HTTPException(status_code=503, detail="Leader news provider is not configured")
+    safe_limit = max(1, min(10, int(limit or 5)))
+    return {
+        "leader": leader_name,
+        "articles": fetch_leader_news(leader_name, limit=safe_limit),
+    }
+
+
+@app.post("/api/leader-news-analysis")
+def leader_news_analysis(payload: LeaderNewsAnalysisRequest) -> dict[str, Any]:
+    return build_leader_news_analysis(payload.articles)
+
+
 @app.get("/api/stock-search")
 def stock_search(q: str = "") -> dict[str, Any]:
     query = norm(q)
     return {
         "query": query,
         "results": search_stocks(query),
+    }
+
+
+@app.get("/api/trending-bull-run")
+def trending_bull_run(limit: int = 5) -> dict[str, Any]:
+    safe_limit = max(3, min(5, int(limit or 5)))
+    items = get_trending_bull_run_stocks(limit=safe_limit)
+    return {
+        "items": items,
+        "horizon": "12M estimate",
+        "updatedAt": datetime.now(timezone.utc).isoformat(),
+        "method": "Momentum + sentiment heuristic",
     }
 
 
@@ -1572,6 +2318,6 @@ Answer in plain English, concise and practical. Mention uncertainty if data is l
 if __name__ == "__main__":
     import uvicorn
 
-    host = env("BACKEND_HOST") or "127.0.0.1"
-    port = int(env("BACKEND_PORT") or "8000")
+    host = env("BACKEND_HOST") or ("0.0.0.0" if env("K_SERVICE", "PORT") else "127.0.0.1")
+    port = int(env("PORT", "BACKEND_PORT") or "8000")
     uvicorn.run(app, host=host, port=port, log_level="info")
