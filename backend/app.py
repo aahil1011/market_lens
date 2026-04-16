@@ -36,7 +36,9 @@ GNEWS_API_KEY = env("GNEWS_API_KEY", "VITE_GNEWS_API_KEY")
 HF_API_TOKEN = env("HF_API_TOKEN", "VITE_HF_API_TOKEN")
 GROQ_API_KEY = env("GROQ_API_KEY")
 GROQ_MODEL = env("GROQ_MODEL") or "llama-3.3-70b-versatile"
-FINBERT_MODEL = "./backend/lora-finbert"
+FINBERT_MODEL  = "./backend/lora-finbert"
+FINGPT_MODEL   = "./backend/fingpt-lora"        # Fine-tuned FinGPT adapter (LoRA + RLHF)
+FINGPT_BASE    = "Qwen/Qwen1.5-0.5B"           # Base model for FinGPT adapter
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
@@ -283,6 +285,160 @@ class PortfolioChatRequest(BaseModel):
 
 class LeaderNewsAnalysisRequest(BaseModel):
     articles: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+
+
+class FinoraChatMessage(BaseModel):
+    role: str = Field(min_length=1, max_length=20)
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class FinoraChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    history: list[FinoraChatMessage] = Field(default_factory=list, max_length=30)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Finora RAG Engine (Groq + FinBERT + Live Retrieval)
+# ─────────────────────────────────────────────────────────────────────────────
+def fetch_google_finance_quote(symbol: str) -> str:
+    try:
+        import urllib.request, re
+        exchanges = ["NASDAQ", "NYSE", "INDEXNSE", "INDEXBOM"]
+        for exch in exchanges:
+            try:
+                url = f"https://www.google.com/finance/quote/{symbol}:{exch}"
+                req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                html = urllib.request.urlopen(req, timeout=5).read().decode('utf-8')
+                match = re.search(r'data-last-price="([^"]+)"', html)
+                if match: return match.group(1)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return ""
+
+
+class FinoraRAGEngine:
+    """Manages the Retrieval-Augmented Generation pipeline using Groq and FinBERT."""
+
+    SYSTEM_PROMPT = (
+        "You are Finora, an expert AI financial context assistant powered by Groq. "
+        "You provide precise, objective answers about stock performance, news, and market trends. "
+        "When provided with live '[LIVE MARKET CONTEXT]', you must synthesize your answer heavily based on that information, explicitly mentioning the FinBERT sentiment analysis. "
+        "If you do not find specific live data for an asset the user asked about, answer generally using your knowledge but explicitly state you don't have its live data. "
+        "IMPORTANT: Be very concise (under 150 words). Use emojis and bullet points to make your response friendly and visually appealing. "
+        "Avoid giving definitive buy/sell advice."
+    )
+
+    def chat(
+        self,
+        message: str,
+        history: list[dict],
+    ) -> dict[str, Any]:
+        """Generate a RAG reply using Groq and FinBERT Context."""
+        message = norm(message)
+
+        # Build Context Block via RAG
+        context_block = ""
+        context_lines = []
+        try:
+            import re
+            
+            # Global Sector Sentiments
+            market_news = fetch_market_news_headlines(limit=6)
+            if market_news:
+                leader_analysis = build_leader_news_analysis(market_news)
+                sectors = leader_analysis.get("sectors", [])
+                if sectors:
+                    context_lines.append("Live Global Sector Sentiments:")
+                    for s in sectors:
+                        context_lines.append(f"• {s.get('name')}: {s.get('nature')}")
+            
+            # Map of common aliases to popular standard tickers
+            text_upper = message.upper()
+            popular_aliases = {"NIFTY": "NIFTY_50", "BANKNIFTY": "NIFTY_BANK", "APPLE": "AAPL", "MICROSOFT": "MSFT", "GOOGLE": "GOOGL", "AMAZON": "AMZN", "TESLA": "TSLA", "NVIDIA": "NVDA"}
+            detected_symbols = []
+            for alias, sym in popular_aliases.items():
+                if alias in text_upper:
+                    detected_symbols.append(sym)
+
+            # Extract standard stock tickers (e.g. AAPL, NVDA) combining regex and basic manual mapping
+            tickers = list(dict.fromkeys(re.findall(r"\b[A-Z]{2,6}\b", message) + detected_symbols))
+            
+            if tickers:
+                symbol = tickers[0]
+                print(f"[Finora] Detected ticker '{symbol}'. Triggering RAG Retrieval...")
+                
+                # Fetch live data
+                q_price = fetch_google_finance_quote(symbol)
+                if not q_price and not symbol.startswith("NIFTY"):
+                    q_data = fetch_finnhub_quote(symbol)
+                    q_price = str(q_data.get('c', '')) if q_data else ""
+                
+                news = fetch_finnhub_news(symbol) or fetch_gnews_news(symbol)
+                news = dedupe_news_items(news, limit=4)
+                
+                if q_price:
+                    context_lines.append(f"\nGoogle Finance Live Price for {symbol}: ${q_price}")
+                
+                if news:
+                    # Score news with Custom LoRA FinBERT
+                    texts = [f"{n.get('title')} {n.get('description', '')}" for n in news]
+                    scored = FINBERT.score_texts(texts)
+                    
+                    context_lines.append(f"\nRecent News & FinBERT Sentiments for {symbol}:")
+                    for doc, score_res in zip(news, scored):
+                        lbl = score_res.get("label", "Neutral")
+                        context_lines.append(f"• {doc['title']} (FinBERT Sentiment: {lbl})")
+                
+            if context_lines:
+                context_block = f"\n\n[LIVE MARKET CONTEXT]\n" + "\n".join(context_lines)
+                print(f"[Finora] RAG Context built successfully.")
+        except Exception as exc:
+            print(f"[Finora] RAG processing error: {exc}")
+
+        prompt = message + context_block
+
+        # ── Groq LLM Generation ─────────────────────────────────────
+        if GROQ_API_KEY:
+            try:
+                messages: list[dict[str, str]] = [
+                    {"role": "system", "content": self.SYSTEM_PROMPT}
+                ]
+                for turn in history[-8:]:
+                    messages.append({
+                        "role": turn.get("role", "user"),
+                        "content": norm(turn.get("content", "")),
+                    })
+                messages.append({"role": "user", "content": prompt})
+
+                resp = post_json(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    {
+                        "Authorization": f"Bearer {GROQ_API_KEY}",
+                        "Content-Type": "application/json",
+                    },
+                    {
+                        "model": GROQ_MODEL,
+                        "temperature": 0.3,
+                        "max_tokens": 800,
+                        "messages": messages,
+                    },
+                    timeout=45,
+                )
+                reply = (((resp or {}).get("choices") or [{}])[0]).get("message", {}).get("content", "")
+                if reply:
+                    return {"reply": norm(reply), "model": f"Groq RAG API ({GROQ_MODEL})"}
+            except Exception as exc:
+                print(f"[Finora] Groq generation error: {exc}")
+
+        return {
+            "reply": "I'm currently offline or missing the GROQ_API_KEY.",
+            "model": "unavailable",
+        }
+
+
+FINORA = FinoraRAGEngine()
 
 
 app = FastAPI(title="MarketLens Stock Backend", version="1.0.0")
@@ -1497,15 +1653,25 @@ def project_portfolio(positions: list[dict[str, Any]], months: int, simulations:
         )
 
     final_values = [path[-1] for path in all_paths]
+    final_p10 = percentile(final_values, 10)
+    final_p90 = percentile(final_values, 90)
+
+    loss_paths = [v for v in final_values if v <= final_p10]
+    gain_paths = [v for v in final_values if v >= final_p90]
+    expected_loss_val = sum(loss_paths) / max(1, len(loss_paths))
+    expected_gain_val = sum(gain_paths) / max(1, len(gain_paths))
+
     return {
         "months": months,
         "days": days,
         "startValue": round(start_val, 2),
         "finalMean": round(sum(final_values) / len(final_values), 2),
-        "finalP10": round(percentile(final_values, 10), 2),
-        "finalP90": round(percentile(final_values, 90), 2),
+        "finalP10": round(final_p10, 2),
+        "finalP90": round(final_p90, 2),
+        "expectedLoss": round(expected_loss_val, 2),
+        "expectedGain": round(expected_gain_val, 2),
         "series": series,
-        "model": "Monte Carlo (Notebook-style)",
+        "model": "Monte Carlo CVaR",
     }
 
 
@@ -2134,6 +2300,23 @@ Return JSON only:
     if prices and prices[0]:
         change_pct = round(((prices[-1] - prices[0]) / prices[0]) * 100, 2)
 
+    try:
+        cur_val = float(quote.get("c") or metric.get("currentPrice") or prices[-1] or 0.0)
+        pos = [{
+            "symbol": ticker,
+            "shares": 1.0,
+            "currentValue": cur_val,
+            "currentPrice": cur_val,
+            "metrics": metric,
+            "sentimentRaw": {"score": agg["score"]}
+        }]
+        proj1Y = project_portfolio(pos, 12, simulations=180)
+        expected_gain_usd = round(proj1Y["expectedGain"] - proj1Y["startValue"], 2)
+        expected_gain_pct = round((expected_gain_usd / max(1, proj1Y["startValue"])) * 100, 2)
+    except Exception:
+        expected_gain_usd = 0.0
+        expected_gain_pct = 0.0
+
     return {
         "symbol": ticker,
         "name": metric.get("name") or ticker,
@@ -2142,6 +2325,8 @@ Return JSON only:
             "score": agg["score"],
             "confidence": llm_conf,
             "model": FINBERT.model_name,
+            "expectedGainPct": expected_gain_pct,
+            "expectedGainUsd": expected_gain_usd
         },
         "reason": {
             "text": llm.get("reason")
@@ -2313,6 +2498,25 @@ Answer in plain English, concise and practical. Mention uncertainty if data is l
     if not answer:
         answer = "I could not generate a model response right now. Please try again."
     return {"answer": norm(answer), "model": f"Groq ({GROQ_MODEL})"}
+
+
+@app.post("/api/finora-chat")
+def finora_chat(payload: FinoraChatRequest) -> dict[str, Any]:
+    """Landing page Finora RAG chatbot endpoint.
+
+    Uses Groq and dynamically fetches stock news, sending them to the
+    FinBERT engine to append context before responding.
+    """
+    message = norm(payload.message)
+    if not message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    history = [
+        {"role": norm(m.role), "content": norm(m.content)}
+        for m in payload.history
+        if norm(m.content)
+    ]
+    return FINORA.chat(message, history)
 
 
 if __name__ == "__main__":

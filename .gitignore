@@ -29,3 +29,6 @@ dist-ssr
 *.sw?
 __pycache__/
 *.pyc
+
+# Ignore large datasets
+tweets.csv

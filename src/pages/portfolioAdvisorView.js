@@ -348,9 +348,34 @@ export function renderPortfolioAdvisorNotebookPage(container, user, options = {}
     const counts = summary.decisionCounts || {};
     const pnlPct = Number(summary.pnlPct || 0);
     const pnlClass = pnlPct > 0 ? "up" : pnlPct < 0 ? "down" : "flat";
+
+    let cvTooltip = "";
+    const proj1Y = payload?.projections?.["1Y"];
+    if (proj1Y && proj1Y.startValue > 0) {
+      const gDiff = proj1Y.expectedGain - proj1Y.startValue;
+      const gPct = (gDiff / proj1Y.startValue) * 100;
+      const lDiff = proj1Y.startValue - proj1Y.expectedLoss;
+      const lPct = (lDiff / proj1Y.startValue) * 100;
+      
+      cvTooltip = `
+        <div class="cv-tooltip">
+          <strong>1Y Expected Shortfall (CVaR)</strong>
+          <div>Expected Gain: <span class="up">+${formatUsd(gDiff)} (+${gPct.toFixed(2)}%)</span></div>
+          <div>Expected Loss: <span class="down">-${formatUsd(lDiff)} (-${lPct.toFixed(2)}%)</span></div>
+          <p style="margin-top: 8px; font-size: 0.74rem; color: rgba(255,255,255,0.4); line-height: 1.4;">Conditional Value at Risk: Calculates the mathematical average of the best 10% and worst 10% of 320 simulated future paths for these exact tickers.</p>
+        </div>
+      `;
+    }
+
     heroStatsEl.innerHTML = `
       <div class="portfolio-stat-card"><span>Total Invested</span><strong>${formatUsd(summary.totalInvested)}</strong></div>
-      <div class="portfolio-stat-card"><span>Current Value</span><strong>${formatUsd(summary.currentValue)}</strong></div>
+      <div class="portfolio-stat-card cv-card-wrapper" style="position: relative;">
+        <span>Current Value 
+          <svg class="cv-info-icon" style="width: 13px; margin-left: 4px; vertical-align: text-top; opacity: 0.6;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+        </span>
+        <strong>${formatUsd(summary.currentValue)}</strong>
+        ${cvTooltip}
+      </div>
       <div class="portfolio-stat-card"><span>Total P&amp;L</span><strong class="advisor-value-${pnlClass}">${formatUsd(summary.pnlUsd)} (${pnlPct.toFixed(2)}%)</strong></div>
       <div class="portfolio-stat-card"><span>Portfolio Score</span><strong>${summary.portfolioScore || "-"}/10</strong></div>
     `;
@@ -656,8 +681,8 @@ function buildProjectionSvg(projection, label) {
       </svg>
       <div class="advisor-projection-meta">
         <div class="portfolio-stat-card"><span>Expected Value</span><strong>${formatUsd(projection.finalMean)}</strong></div>
-        <div class="portfolio-stat-card"><span>Bear (10%)</span><strong>${formatUsd(projection.finalP10)}</strong></div>
-        <div class="portfolio-stat-card"><span>Bull (90%)</span><strong>${formatUsd(projection.finalP90)}</strong></div>
+        <div class="portfolio-stat-card"><span>10th Percentile Confidence</span><strong>${formatUsd(projection.finalP10)}</strong></div>
+        <div class="portfolio-stat-card"><span>90th Percentile Probability</span><strong>${formatUsd(projection.finalP90)}</strong></div>
       </div>
     </div>
   `;

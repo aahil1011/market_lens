@@ -53,6 +53,10 @@
   padding: 96px 24px 42px;
 }
 
+.portfolio-advisor-page .portfolio-content {
+  max-width: 1600px;
+}
+
 .portfolio-maker-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(440px, 1.2fr);
@@ -693,7 +697,8 @@
 .advisor-pill.risk.high-risk { background: rgba(239, 68, 68, 0.14); color: #fca5a5; border-color: rgba(239,68,68,0.22); }
 
 .advisor-workspace {
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: 1fr;
+  padding-right: 360px;
   gap: 18px;
   align-items: start;
 }
@@ -704,15 +709,19 @@
 }
 
 .advisor-add-card {
-  width: 100%;
+  width: 320px;
   padding: 20px;
   box-shadow: var(--shadow-md);
-  align-self: start;
-  position: sticky;
+  position: fixed;
+  right: 20px;
   top: 102px;
+  z-index: 50;
   max-height: calc(100vh - 128px);
   overflow-x: hidden;
   overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  background: rgba(12, 16, 48, 0.95);
+  backdrop-filter: blur(12px);
 }
 
 .advisor-selected-stock {
@@ -900,12 +909,65 @@
   border-color: rgba(124, 139, 255, 0.24);
 }
 
+.cv-card-wrapper {
+  position: relative;
+  cursor: default;
+}
+.cv-card-wrapper:hover .cv-info-icon { opacity: 1 !important; color: #a5b4fc; }
+
+.cv-tooltip {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  width: max-content;
+  min-width: 260px;
+  background: rgba(12, 16, 48, 0.98);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255,255,255,0.04) inset;
+  backdrop-filter: blur(12px);
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.2s ease-out;
+  z-index: 100;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+.cv-card-wrapper:hover .cv-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+.cv-tooltip strong {
+  display: block;
+  font-family: var(--font-main);
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.cv-tooltip div {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-family: var(--font-display);
+}
+.cv-tooltip span.up { color: #86efac; font-weight: 700; }
+.cv-tooltip span.down { color: #fca5a5; font-weight: 700; }
+
 @media (max-width: 1180px) {
   .advisor-hero-card,
   .advisor-workspace,
   .advisor-bottom-grid { grid-template-columns: 1fr; }
 
+  .advisor-workspace { padding-right: 0; }
+
   .advisor-add-card {
+    width: 100%;
     position: static;
     max-height: none;
     overflow: visible;
